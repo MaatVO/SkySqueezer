@@ -2,7 +2,7 @@
 
 The app has four layers:
 
-1. **Interface:** the NiceGUI web UI and the `edh-dl` command line.
+1. **Interface:** the NiceGUI web UI and the `sks-dl` command line.
 2. **Service:** plain functions, JSON in and JSON out, that do everything the interface needs.
 3. **Sources:** Earth Data Hub and the Climate Data Store, each with its own catalogue, planner and engine.
 4. **Shared output:** decoding, aggregation, the Icechunk repository and the Zarr export.
@@ -17,10 +17,10 @@ answers over SSH, the service launches detached job workers and keeps all files]
 
 | Situation | Interface | Service and jobs |
 |---|---|---|
-| `edh-dl` on your computer, "This computer" | your computer | the same process (`backend.Local`) |
-| `edh-dl` on your computer, a server tab | your computer | the server, through `edh-dl agent` over SSH (`backend.Remote`) |
-| `edh-dl serve` on a server, opened through the launcher or a tunnel | the server, shown in your browser | the server, same process |
-| `edh-dl run job.json --detach` | none | the machine where you type it |
+| `sks-dl` on your computer, "This computer" | your computer | the same process (`backend.Local`) |
+| `sks-dl` on your computer, a server tab | your computer | the server, through `sks-dl agent` over SSH (`backend.Remote`) |
+| `sks-dl serve` on a server, opened through the launcher or a tunnel | the server, shown in your browser | the server, same process |
+| `sks-dl run job.json --detach` | none | the machine where you type it |
 
 `backend.Local` and `backend.Remote` have the same interface (`await call(method, **kwargs)`) and return the same
 JSON, so the UI code does not know which one it is talking to. See [Remote use](remote.md) for the SSH side.
@@ -29,12 +29,12 @@ JSON, so the UI code does not know which one it is talking to. See [Remote use](
 
 | Process | Started by | Lifetime | Code |
 |---|---|---|---|
-| App (connect shell) | `edh-dl` / `edh-dl app` | until you quit it | [gui/connect.py](../src/edh_downloader/gui/connect.py) |
-| Web UI | the app (one page per connection) or `edh-dl serve` | as long as the page is served | [gui/app.py](../src/edh_downloader/gui/app.py) |
-| Agent | the app, over SSH | until the connection closes | [agent.py](../src/edh_downloader/agent.py) |
-| Job worker | `runner.launch` (Start, Resume, `edh-dl run --detach`) | until the job stops | [runner.py](../src/edh_downloader/runner.py), [engine.py](../src/edh_downloader/engine.py), [sources/cds/engine.py](../src/edh_downloader/sources/cds/engine.py) |
+| App (connect shell) | `sks-dl` / `sks-dl app` | until you quit it | [gui/connect.py](../src/skysqueezer/gui/connect.py) |
+| Web UI | the app (one page per connection) or `sks-dl serve` | as long as the page is served | [gui/app.py](../src/skysqueezer/gui/app.py) |
+| Agent | the app, over SSH | until the connection closes | [agent.py](../src/skysqueezer/agent.py) |
+| Job worker | `runner.launch` (Start, Resume, `sks-dl run --detach`) | until the job stops | [runner.py](../src/skysqueezer/runner.py), [engine.py](../src/skysqueezer/engine.py), [sources/cds/engine.py](../src/skysqueezer/sources/cds/engine.py) |
 
-A job worker is the same executable started as `edh-dl _worker <job folder>`, in a new session (`setsid`), with
+A job worker is the same executable started as `sks-dl _worker <job folder>`, in a new session (`setsid`), with
 no terminal. It does not depend on the process that started it, so it survives a closed browser, a closed SSH
 session and a restarted app. The UI and the worker share only files: the worker writes `state.json` and reads
 `control.json`. See [Jobs](jobs.md).
@@ -60,18 +60,20 @@ Everything lives under three folders (XDG locations, each of them can be moved w
 
 | Folder | Default | Override | Holds |
 |---|---|---|---|
-| Config | `~/.config/edh-dl` | `EDH_DL_CONFIG_DIR` | `keys.json` (0600), `servers.json` (0600, never a password) |
-| Data | `~/.local/share/edh-dl` | `EDH_DL_DATA_DIR` | `jobs/<id>/`, `usage.json`; on a server also the agent's `venv-<deps id>/` and `agent/<build>.zip` |
-| Cache | `~/.cache/edh-dl` | `EDH_DL_CACHE_DIR` | catalogues, coordinates, CDS forms and constraints, sample chunks |
+| Config | `~/.config/sks-dl` | `SKS_DL_CONFIG_DIR` | `keys.json` (0600), `servers.json` (0600, never a password) |
+| Data | `~/.local/share/sks-dl` | `SKS_DL_DATA_DIR` | `jobs/<id>/`, `usage.json`; on a server also the agent's `venv-<deps id>/` and `agent/<build>.zip` |
+| Cache | `~/.cache/sks-dl` | `SKS_DL_CACHE_DIR` | catalogues, coordinates, CDS forms and constraints, sample chunks |
 
-The output stores go wherever the job says (`output.directory`, `~/edh-data` by default).
+The output stores go wherever the job says (`output.directory`, `~/sks-data` by default).
 
-The folder names and the `edh-dl` command keep the project's first name (*EDH Downloader*), so existing keys,
-jobs and servers keep working.
+Installs from before the SkySqueezer rename have these folders as `edh-dl`. While only the old folder exists it
+stays in use and nothing is moved, so keys, jobs and workers still running keep working; the old `EDH_DL_*`
+variable names are still read ([paths.py](../src/skysqueezer/paths.py)). On a server the agent's folder follows the
+same rule ([remote.py](../src/skysqueezer/remote.py)).
 
 ## Adding a source
 
-A source is registered in [sources/__init__.py](../src/edh_downloader/sources/__init__.py) with what the rest of
+A source is registered in [sources/__init__.py](../src/skysqueezer/sources/__init__.py) with what the rest of
 the app needs to know: its id and names, where to get a key, whether it has a monthly quota, what checking a
 key costs, and whether it can run jobs. Jobs, keys and UI state
 carry the source id. A new source needs:

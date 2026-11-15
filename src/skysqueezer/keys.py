@@ -183,7 +183,7 @@ def get_key(name: str | None = None, provider: str = EDH) -> ApiKey:
     if not keys:
         raise KeyError(
             f"no {src.title} API key configured: get one at {src.key_url} "
-            "then add it in the Keys page or with `edh-dl keys add NAME`"
+            "then add it in the Keys page or with `sks-dl keys add NAME`"
             + (f" --source {provider}" if provider != EDH else "")
         )
     if name is None:

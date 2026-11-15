@@ -2,18 +2,18 @@
 
 <img src="docs/logo.svg" alt="A man sitting on the Earth squeezes the sun; its juice falls as pixels into a glass jar that fills up as a heatmap" width="200">
 
-# WeatherFetch
+# SkySqueezer
 
 ### Squeeze the weather out of the sky, straight into a dataset.
 
-**WeatherFetch** is a resumable downloader for weather and climate datasets from **Earth Data Hub** and the **Copernicus Climate Data Store**. Pick the variables, the period, the area and the grid; get an analysis-ready **Icechunk** or **Zarr v3** store, through a web interface or the command line.
+**SkySqueezer** is a resumable downloader for weather and climate datasets from **Earth Data Hub** and the **Copernicus Climate Data Store**. Pick the variables, the period, the area and the grid; get an analysis-ready **Icechunk** or **Zarr v3** store, through a web interface or the command line.
 
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Zarr](https://img.shields.io/badge/Zarr-v3-orange)](https://zarr.dev/)
 [![Icechunk](https://img.shields.io/badge/Storage-Icechunk-blue)](https://icechunk.io/)
 [![License](https://img.shields.io/badge/License-Apache--2.0-green.svg)](LICENSE)
-[![Build](https://img.shields.io/github/actions/workflow/status/MaatVO/WeatherFetch/build.yml?label=build)](.github/workflows/build.yml)
-[![GitHub Release](https://img.shields.io/github/v/release/MaatVO/WeatherFetch)](https://github.com/MaatVO/WeatherFetch/releases)
+[![Build](https://img.shields.io/github/actions/workflow/status/MaatVO/SkySqueezer/build.yml?label=build)](.github/workflows/build.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/MaatVO/SkySqueezer)](https://github.com/MaatVO/SkySqueezer/releases)
 
 [Sources](#data-sources) · [Features](#features) · [Installation](#installation) · [Getting Started](#getting-started) · [Climate Data Store](#climate-data-store) · [CLI](#command-line-interface) · [Output](#output-formats) · [Architecture](#architecture) · [How it works](docs/README.md)
 
@@ -23,7 +23,7 @@
 
 ## Overview
 
-**WeatherFetch** turns "I need these variables, over this region and period, at this resolution" into an analysis-ready dataset on your disk or your server, without pulling whole archives and without wasting your API allowance or your place in a queue.
+**SkySqueezer** turns "I need these variables, over this region and period, at this resolution" into an analysis-ready dataset on your disk or your server, without pulling whole archives and without wasting your API allowance or your place in a queue.
 
 It provides an interactive web interface, a command-line interface and a remote execution workflow over SSH.
 
@@ -35,7 +35,7 @@ Downloads run as independent background jobs. They can be interrupted, resumed o
 
 Getting weather data for an analysis is rarely just "downloading a file". Each provider has its own API, its own limits and its own formats: Earth Data Hub counts every chunk against a monthly quota, the Climate Data Store queues every request and slows down clients that send too many. On top of that you need the right variables, a spatial subset, a time resolution, and a layout that is fast to read in Xarray.
 
-WeatherFetch handles the provider side (requests, quotas, queues, retries, resuming) so you only describe the data you want.
+SkySqueezer handles the provider side (requests, quotas, queues, retries, resuming) so you only describe the data you want.
 
 ## Data sources
 
@@ -119,7 +119,7 @@ Every completed unit is committed to Icechunk, providing a reliable checkpoint f
 
 ### 🧊 Modern scientific storage
 
-WeatherFetch uses [Icechunk](https://icechunk.io/) as its transactional storage layer and supports exporting datasets to standard [Zarr v3](https://zarr.dev/) stores.
+SkySqueezer uses [Icechunk](https://icechunk.io/) as its transactional storage layer and supports exporting datasets to standard [Zarr v3](https://zarr.dev/) stores.
 
 Features include:
 
@@ -150,7 +150,7 @@ The interface runs locally on your computer, while computation, API keys, downlo
 
 ### 🖥️ Cross-platform standalone application
 
-WeatherFetch can be distributed as a standalone executable.
+SkySqueezer can be distributed as a standalone executable.
 
 Pre-built releases are provided through GitHub Releases for:
 
@@ -158,7 +158,7 @@ Pre-built releases are provided through GitHub Releases for:
 - macOS
 - Windows
 
-The packaged application supports automatic updates, with release checksums verified before installation.
+The packaged application checks for new releases at start-up and asks before installing one; release checksums are verified before installation.
 
 ---
 
@@ -168,17 +168,17 @@ The packaged application supports automatic updates, with release checksums veri
 
 Download the latest executable for your operating system from:
 
-**[GitHub Releases](https://github.com/MaatVO/WeatherFetch/releases)**
+**[GitHub Releases](https://github.com/MaatVO/SkySqueezer/releases)**
 
 Launch the application:
 
 ```bash
-./edh-dl
+./sks-dl
 ```
 
 On Windows, launch the downloaded executable.
 
-The command is still called `edh-dl`, from the project's first name; existing jobs, keys and servers keep working.
+The command is `sks-dl` (`edh-dl` before the SkySqueezer rename). Existing installs keep their `edh-dl` folders, so jobs, keys and servers keep working.
 
 The application opens a connection page in your browser, where you can select a remote server or run everything locally.
 
@@ -192,9 +192,9 @@ Requirements:
 Clone the repository:
 
 ```bash
-git clone https://github.com/MaatVO/WeatherFetch.git
+git clone https://github.com/MaatVO/SkySqueezer.git
 
-cd WeatherFetch
+cd SkySqueezer
 ```
 
 Install dependencies:
@@ -206,7 +206,7 @@ uv sync
 Start the application:
 
 ```bash
-uv run edh-dl serve
+uv run sks-dl serve
 ```
 
 ### Option 3 — Install as a Python tool
@@ -214,13 +214,13 @@ uv run edh-dl serve
 If you already have the repository locally:
 
 ```bash
-uv tool install /path/to/WeatherFetch
+uv tool install /path/to/SkySqueezer
 ```
 
 Then launch it using:
 
 ```bash
-edh-dl
+sks-dl
 ```
 
 ---
@@ -236,13 +236,13 @@ Obtain an API key from [Earth Data Hub](https://earthdatahub.destine.eu/), the [
 You can configure it through the application's **Keys** tab or using the CLI:
 
 ```bash
-edh-dl keys add my-key
+sks-dl keys add my-key
 ```
 
 Keys are stored locally in:
 
 ```text
-~/.config/edh-dl/keys.json
+~/.config/sks-dl/keys.json
 ```
 
 The application also supports reading credentials from `~/.netrc`:
@@ -255,7 +255,7 @@ password YOUR_API_KEY
 
 API keys are never written into job specifications or output metadata. Only the associated key name is recorded.
 
-Keys for the [Copernicus Climate Data Store](https://cds.climate.copernicus.eu/) (CDS) can be added the same way, in their own group of the **Keys** tab or with `edh-dl keys add NAME --source cds`. The app also reads the token from `~/.cdsapirc` (the file the `cdsapi` package uses). Checking a CDS key is free. See [Climate Data Store](#climate-data-store) for how CDS downloads differ.
+Keys for the [Copernicus Climate Data Store](https://cds.climate.copernicus.eu/) (CDS) can be added the same way, in their own group of the **Keys** tab or with `sks-dl keys add NAME --source cds`. The app also reads the token from `~/.cdsapirc` (the file the `cdsapi` package uses). Checking a CDS key is free. See [Climate Data Store](#climate-data-store) for how CDS downloads differ.
 
 ### 2. Select your dataset
 
@@ -313,13 +313,13 @@ Jobs remain available when you reconnect to the application.
 
 ## Remote Execution
 
-WeatherFetch supports two approaches to remote execution.
+SkySqueezer supports two approaches to remote execution.
 
 ### A. Using the desktop application
 
 The recommended workflow is to run the standalone application on your local computer.
 
-1. Launch `edh-dl`.
+1. Launch `sks-dl`.
 2. Open the connection page.
 3. Select an SSH host or enter a server address.
 4. Authenticate using your SSH key, agent or password.
@@ -332,7 +332,7 @@ The server does not need a manually installed copy of the application.
 The application creates an environment under:
 
 ```text
-~/.local/share/edh-dl
+~/.local/share/sks-dl
 ```
 
 It installs the required dependencies once and subsequently transfers only the application code when updates are necessary.
@@ -346,7 +346,7 @@ For environments where you prefer not to run the desktop application, the applic
 On macOS, Linux or WSL:
 
 ```bash
-ssh me@server '/path/to/edh-dl launcher sh' > edh-connect
+ssh me@server '/path/to/sks-dl launcher sh' > edh-connect
 
 chmod +x edh-connect
 
@@ -362,7 +362,7 @@ You can also specify another SSH destination:
 On Windows 10/11:
 
 ```powershell
-ssh me@server "/path/to/edh-dl launcher ps1" > edh-connect.ps1
+ssh me@server "/path/to/sks-dl launcher ps1" > edh-connect.ps1
 
 powershell -ExecutionPolicy Bypass -File edh-connect.ps1
 ```
@@ -392,7 +392,7 @@ The application includes its own quota accounting system to help manage consumpt
 Usage is tracked per API key and calendar month in:
 
 ```text
-~/.local/share/edh-dl/usage.json
+~/.local/share/sks-dl/usage.json
 ```
 
 The application:
@@ -462,20 +462,20 @@ In addition to the web interface, the application provides a CLI for scripting, 
 List available datasets:
 
 ```bash
-edh-dl datasets
+sks-dl datasets
 ```
 
 Inspect the variables, pressure levels and temporal range of a dataset:
 
 ```bash
-edh-dl variables era5-pressure-levels
+sks-dl variables era5-pressure-levels
 ```
 
 List Climate Data Store datasets, optionally of one product type:
 
 ```bash
-edh-dl datasets --source cds
-edh-dl datasets --source cds --collection Reanalysis
+sks-dl datasets --source cds
+sks-dl datasets --source cds --collection Reanalysis
 ```
 
 ### Download planning
@@ -485,25 +485,25 @@ Create a job specification through the web interface and save it as `job.json`.
 Estimate the cost of the operation:
 
 ```bash
-edh-dl plan job.json
+sks-dl plan job.json
 ```
 
 Optionally benchmark the download using real source chunks:
 
 ```bash
-edh-dl plan job.json --sample
+sks-dl plan job.json --sample
 ```
 
 This operation uses 12 API requests and asks for confirmation.
 
-For a CDS job, `edh-dl plan` lists the requests the job will send, their cost against the dataset's limit and any constraint or licence problem. It is free and does not enter the queue.
+For a CDS job, `sks-dl plan` lists the requests the job will send, their cost against the dataset's limit and any constraint or licence problem. It is free and does not enter the queue.
 
 ### Execute downloads
 
 Start a detached download:
 
 ```bash
-edh-dl run job.json --detach
+sks-dl run job.json --detach
 ```
 
 ### Job management
@@ -511,21 +511,21 @@ edh-dl run job.json --detach
 The CLI supports the following operations:
 
 ```bash
-edh-dl jobs
+sks-dl jobs
 
-edh-dl status ID
+sks-dl status ID
 
-edh-dl log ID
+sks-dl log ID
 
-edh-dl pause ID
+sks-dl pause ID
 
-edh-dl resume ID
+sks-dl resume ID
 
-edh-dl resume ID --connections 8
+sks-dl resume ID --connections 8
 
-edh-dl cancel ID
+sks-dl cancel ID
 
-edh-dl export ID
+sks-dl export ID
 ```
 
 ### Development and local server
@@ -533,7 +533,7 @@ edh-dl export ID
 Start the web interface:
 
 ```bash
-edh-dl serve
+sks-dl serve
 ```
 
 Generate a standalone executable:
@@ -546,7 +546,7 @@ packaging/build.sh
 
 ## Output Formats
 
-WeatherFetch supports two complementary storage formats, whatever the source.
+SkySqueezer supports two complementary storage formats, whatever the source.
 
 ### Icechunk
 
@@ -586,7 +586,7 @@ If only Icechunk output is selected, the repository is retained.
 ```python
 import xarray as xr
 
-ds = xr.open_zarr("~/edh-data/dataset.zarr")
+ds = xr.open_zarr("~/sks-data/dataset.zarr")
 
 print(ds)
 ```
@@ -598,7 +598,7 @@ import icechunk
 import xarray as xr
 
 storage = icechunk.local_filesystem_storage(
-    "~/edh-data/dataset.icechunk"
+    "~/sks-data/dataset.icechunk"
 )
 
 repo = icechunk.Repository.open(storage)
@@ -681,7 +681,7 @@ Additional options include compression levels, shuffle filters, optional shardin
 
 The [documentation](docs/README.md) explains every part in detail, with diagrams: the [architecture](docs/architecture.md), [jobs](docs/jobs.md), the [Earth Data Hub](docs/earth-data-hub.md) and [Climate Data Store](docs/climate-data-store.md) pipelines, [storage](docs/storage.md), [remote use](docs/remote.md), [keys and quota](docs/keys-and-quota.md) and [releases](docs/releases.md).
 
-WeatherFetch is organized around a modular download and processing pipeline. Each source plugs in its own catalogue, planner and engine; everything from decoding onwards is shared.
+SkySqueezer is organized around a modular download and processing pipeline. Each source plugs in its own catalogue, planner and engine; everything from decoding onwards is shared.
 
 ```text
                   ┌──────────────────────┐
@@ -779,7 +779,7 @@ Tests do not consume Earth Data Hub API quota. CDS jobs are tested end to end ag
 For offline development, set:
 
 ```bash
-export EDH_DL_OFFLINE=1
+export SKS_DL_OFFLINE=1
 ```
 
 This prevents the application from performing uncached metadata requests, making it useful when developing the interface without accessing the remote catalogue.
@@ -801,7 +801,7 @@ This prevents the application from performing uncached metadata requests, making
 
 ## Credits and Acknowledgements
 
-WeatherFetch builds upon the open scientific data ecosystem and the infrastructure provided by:
+SkySqueezer builds upon the open scientific data ecosystem and the infrastructure provided by:
 
 - **[Earth Data Hub](https://earthdatahub.destine.eu/)** — data access, catalogue services and underlying meteorological datasets.
 - **[Copernicus Climate Data Store](https://cds.climate.copernicus.eu/)** — catalogue and retrieve services for the Copernicus climate datasets.
@@ -825,8 +825,8 @@ See [LICENSE](LICENSE) for the full license text.
 
 **Squeeze the sun. Keep the data.**
 
-If you find WeatherFetch useful, consider giving the project a ⭐ on GitHub.
+If you find SkySqueezer useful, consider giving the project a ⭐ on GitHub.
 
-[Repository](https://github.com/MaatVO/WeatherFetch) · [Issues](https://github.com/MaatVO/WeatherFetch/issues) · [Releases](https://github.com/MaatVO/WeatherFetch/releases)
+[Repository](https://github.com/MaatVO/SkySqueezer) · [Issues](https://github.com/MaatVO/SkySqueezer/issues) · [Releases](https://github.com/MaatVO/SkySqueezer/releases)
 
 </div>

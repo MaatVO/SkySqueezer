@@ -2,10 +2,10 @@
 
 from test_cds_engine import fast, spec  # noqa: F401  (fixture)
 
-from edh_downloader import runner
-from edh_downloader.gui.app import activity_rows, request_rows
-from edh_downloader.runner import create_job, run_foreground
-from edh_downloader.sources.cds import engine as cds_engine
+from skysqueezer import runner
+from skysqueezer.gui.app import activity_rows, request_rows
+from skysqueezer.runner import create_job, run_foreground
+from skysqueezer.sources.cds import engine as cds_engine
 
 
 def test_activity_rows():

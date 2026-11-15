@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "generatedAt": "2026-11-09T13:41:04+00:00",
-  "title": "Design System: Weather Dataset Downloader",
+  "title": "Design System: SkySqueezer",
   "extensions": {
     "colorMeta": {
       "signal-blue": {
@@ -344,13 +344,13 @@
       "kind": "custom",
       "refersTo": "",
       "description": "Roboto Mono for job IDs and output paths.",
-      "html": "<code class=\"ds-mono\">~/edh-data/dataset.zarr</code>",
+      "html": "<code class=\"ds-mono\">~/sks-data/dataset.zarr</code>",
       "css": ".ds-mono{font-family:'Roboto Mono', monospace;font-size:12px;color:var(--edh-muted, #98a2b0);}"
     }
   ],
   "narrative": {
     "northStar": "The Instrument Panel",
-    "overview": "Weather Dataset Downloader looks like a quiet dark panel of labelled controls and readouts. Nothing on it is decoration: every element either sets a value or reports one. A researcher configures one consequential job here and later glances back to see how it is doing, so the surface stays calm, exact and unshowy, and trust comes from precision and legibility rather than from visual effect.\n\nThe panel is built from three tonal steps of slate, one lit colour and solid fills. Signal Blue marks where action or selection is. Green, amber and red appear only when they are reporting a state. Numbers are the most prominent content on screen wherever a decision or a check-in depends on them.\n\nDensity is moderate and form-like: a numbered sequence of setup panels beside a sticky summary of what the job will cost. Glows and decorative gradients are refused, as is consumer SaaS gloss.",
+    "overview": "SkySqueezer looks like a quiet dark panel of labelled controls and readouts. Nothing on it is decoration: every element either sets a value or reports one. A researcher configures one consequential job here and later glances back to see how it is doing, so the surface stays calm, exact and unshowy, and trust comes from precision and legibility rather than from visual effect.\n\nThe panel is built from three tonal steps of slate, one lit colour and solid fills. Signal Blue marks where action or selection is. Green, amber and red appear only when they are reporting a state. Numbers are the most prominent content on screen wherever a decision or a check-in depends on them.\n\nDensity is moderate and form-like: a numbered sequence of setup panels beside a sticky summary of what the job will cost. Glows and decorative gradients are refused, as is consumer SaaS gloss.",
     "keyCharacteristics": [
       "Flat, solid surfaces separated by tone, with no shadows and no borders on panels.",
       "One accent colour; status colours carry state only.",

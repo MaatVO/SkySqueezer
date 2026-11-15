@@ -548,55 +548,6 @@ wheels = [
 ]
 
 [[package]]
-name = "edh-downloader"
-version = "1.0.0"
-source = { editable = "." }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "asyncssh" },
-    { name = "eccodes" },
-    { name = "eccodeslib", marker = "sys_platform != 'win32'" },
-    { name = "icechunk" },
-    { name = "netcdf4" },
-    { name = "nicegui" },
-    { name = "numcodecs" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "xarray" },
-    { name = "zarr" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "playwright" },
-    { name = "pyinstaller" },
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiohttp", specifier = ">=3.14.5" },
-    { name = "asyncssh", specifier = ">=2.24.1" },
-    { name = "eccodes", specifier = ">=2.40" },
-    { name = "eccodeslib", marker = "sys_platform != 'win32'", specifier = ">=2.50.0.34" },
-    { name = "icechunk", specifier = ">=2.3.1" },
-    { name = "netcdf4", specifier = ">=1.7" },
-    { name = "nicegui", specifier = ">=3.19.0" },
-    { name = "numcodecs", specifier = ">=0.17.1" },
-    { name = "numpy", specifier = ">=2.5.4" },
-    { name = "pandas", specifier = ">=3.1.0" },
-    { name = "xarray", specifier = ">=2026.9.0" },
-    { name = "zarr", specifier = ">=3" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "playwright", specifier = ">=1.64.1" },
-    { name = "pyinstaller", specifier = ">=6.22.3" },
-    { name = "pytest", specifier = ">=9.2.0" },
-]
-
-[[package]]
 name = "fastapi"
 version = "0.162.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2148,6 +2099,55 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b0/d4/bfa032f961103eba93de583b161f0e6a5b63cebb8f2c7d0c6e6efe1e3d2e/simple_websocket-1.1.0.tar.gz", hash = "sha256:7939234e7aa067c534abdab3a9ed933ec9ce4691b0713c78acb195560aa52ae4", size = 17300, upload-time = "2024-10-10T22:39:31.412Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/52/59/0782e51887ac6b07ffd1570e0364cf901ebc36345fea669969d2084baebb/simple_websocket-1.1.0-py3-none-any.whl", hash = "sha256:4af6069630a38ed6c561010f0e11a5bc0d4ca569b36306eb257cd9a192497c8c", size = 13842, upload-time = "2024-10-10T22:39:29.645Z" },
+]
+
+[[package]]
+name = "skysqueezer"
+version = "1.0.0"
+source = { editable = "." }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "asyncssh" },
+    { name = "eccodes" },
+    { name = "eccodeslib", marker = "sys_platform != 'win32'" },
+    { name = "icechunk" },
+    { name = "netcdf4" },
+    { name = "nicegui" },
+    { name = "numcodecs" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "xarray" },
+    { name = "zarr" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "playwright" },
+    { name = "pyinstaller" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.14.5" },
+    { name = "asyncssh", specifier = ">=2.24.1" },
+    { name = "eccodes", specifier = ">=2.40" },
+    { name = "eccodeslib", marker = "sys_platform != 'win32'", specifier = ">=2.50.0.34" },
+    { name = "icechunk", specifier = ">=2.3.1" },
+    { name = "netcdf4", specifier = ">=1.7" },
+    { name = "nicegui", specifier = ">=3.19.0" },
+    { name = "numcodecs", specifier = ">=0.17.1" },
+    { name = "numpy", specifier = ">=2.5.4" },
+    { name = "pandas", specifier = ">=3.1.0" },
+    { name = "xarray", specifier = ">=2026.9.0" },
+    { name = "zarr", specifier = ">=3" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "playwright", specifier = ">=1.64.1" },
+    { name = "pyinstaller", specifier = ">=6.22.3" },
+    { name = "pytest", specifier = ">=9.2.0" },
 ]
 
 [[package]]

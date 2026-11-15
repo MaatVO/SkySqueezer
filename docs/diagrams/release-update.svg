@@ -19,24 +19,24 @@
 <text x="785.0" y="159.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">notes from the commits</text>
 <path d="M785 176 L785 206 L115 206 L115 226" fill="none" stroke="#1C9A5A" stroke-width="2.2" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#a-store)"/>
 <rect x="30" y="230" width="200" height="96" rx="12" fill="#E8F0FF" stroke="#3B7BF0" stroke-width="2"/>
-<text x="130.0" y="265.0" font-size="15" font-weight="650" fill="#1F2A37" text-anchor="middle">edh-dl starts</text>
+<text x="130.0" y="265.0" font-size="15" font-weight="650" fill="#1F2A37" text-anchor="middle">sks-dl starts</text>
 <text x="130.0" y="286.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">never delayed:</text>
 <text x="130.0" y="304.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">the check runs alongside</text>
 <path d="M230 278 L256 278" fill="none" stroke="#44546A" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#a-ink)"/>
 <rect x="260" y="230" width="210" height="96" rx="12" fill="#EEF1F6" stroke="#44546A" stroke-width="2"/>
 <text x="365.0" y="265.0" font-size="15" font-weight="650" fill="#1F2A37" text-anchor="middle">Newer release?</text>
-<text x="365.0" y="286.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">asks GitHub for the</text>
-<text x="365.0" y="304.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">latest one, in background</text>
+<text x="365.0" y="286.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">found in the background:</text>
+<text x="365.0" y="304.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">a pop-up asks you first</text>
 <path d="M470 278 L496 278" fill="none" stroke="#44546A" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#a-ink)"/>
 <rect x="500" y="230" width="200" height="96" rx="12" fill="#F1E8FF" stroke="#7B34DB" stroke-width="2"/>
 <text x="600.0" y="265.0" font-size="15" font-weight="650" fill="#1F2A37" text-anchor="middle">Download + verify</text>
-<text x="600.0" y="286.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">SHA-256 must match</text>
-<text x="600.0" y="304.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">else nothing changes</text>
+<text x="600.0" y="286.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">only on your yes;</text>
+<text x="600.0" y="304.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">SHA-256 must match</text>
 <path d="M700 278 L726 278" fill="none" stroke="#1C9A5A" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#a-ok)"/>
 <rect x="730" y="230" width="200" height="96" rx="12" fill="#E3F7EC" stroke="#1C9A5A" stroke-width="2"/>
 <text x="830.0" y="265.0" font-size="15" font-weight="650" fill="#1F2A37" text-anchor="middle">Swap the executable</text>
 <text x="830.0" y="286.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">the running one goes on;</text>
 <text x="830.0" y="304.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">new version next start</text>
 <text x="30" y="360" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="start">Only the packaged executable updates itself (not source or uv tool installs, not +local builds).</text>
-<text x="30" y="378" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="start">Opt out with --no-update or EDH_DL_NO_UPDATE=1; edh-dl update does it on demand.</text>
+<text x="30" y="378" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="start">Opt out with --no-update or SKS_DL_NO_UPDATE=1; sks-dl update does it on demand.</text>
 </svg>

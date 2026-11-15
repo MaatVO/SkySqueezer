@@ -1,7 +1,7 @@
 """The app's Python code as one small zip, to run the agent on a server (``PYTHONPATH=agent.zip``).
 
 From source it is built on the fly; in the packaged executable it is read from the copy added at build time
-(``python -m edh_downloader.bundle <file>`` writes it). The build id is a hash of the content: the server keeps one
+(``python -m skysqueezer.bundle <file>`` writes it). The build id is a hash of the content: the server keeps one
 zip per build and uploads only when this computer's code differs.
 """
 
@@ -35,7 +35,7 @@ def build() -> tuple[bytes, str]:
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             for p, rel in _files(Path(__file__).parent):
                 z.writestr(zipfile.ZipInfo(rel, (2020, 1, 1, 0, 0, 0)), p.read_bytes(), zipfile.ZIP_DEFLATED)
-            z.writestr(zipfile.ZipInfo("edh_downloader/gui/__init__.py", (2020, 1, 1, 0, 0, 0)), "")
+            z.writestr(zipfile.ZipInfo("skysqueezer/gui/__init__.py", (2020, 1, 1, 0, 0, 0)), "")
         data = buf.getvalue()
     return data, hashlib.sha256(data).hexdigest()[:12]
 

@@ -1,4 +1,4 @@
-from edh_downloader import sshconfig
+from skysqueezer import sshconfig
 
 
 def test_hosts_and_lookup(tmp_path, monkeypatch):
@@ -26,7 +26,7 @@ def test_missing_config(tmp_path, monkeypatch):
 
 
 def test_known_hosts_options(tmp_path):
-    from edh_downloader import sshconfig
+    from skysqueezer import sshconfig
 
     cfg = tmp_path / "config"
     cfg.write_text("Host leo\n  HostName login.example.org\n  StrictHostKeyChecking No\n"

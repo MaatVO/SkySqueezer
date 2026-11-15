@@ -31,9 +31,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04, name: linux-x86_64, exe: edh-dl }
-          - { os: macos-latest, name: macos-arm64, exe: edh-dl }
-          - { os: windows-2022, name: windows-x86_64, exe: edh-dl.exe }
+          - { os: ubuntu-22.04, name: linux-x86_64, exe: sks-dl }
+          - { os: macos-latest, name: macos-arm64, exe: sks-dl }
+          - { os: windows-2022, name: windows-x86_64, exe: sks-dl.exe }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -41,19 +41,19 @@ jobs:
       - run: bash packaging/build.sh
         shell: bash
         env:
-          EDH_DL_VERSION: ${{ needs.version.outputs.version }}
+          SKS_DL_VERSION: ${{ needs.version.outputs.version }}
       - name: Name the asset
         shell: bash
         run: |
-          ext="${{ matrix.exe }}"; ext="${ext#edh-dl}"
-          out="edh-dl-${{ needs.version.outputs.tag }}-${{ matrix.name }}${ext}"
+          ext="${{ matrix.exe }}"; ext="${ext#sks-dl}"
+          out="sks-dl-${{ needs.version.outputs.tag }}-${{ matrix.name }}${ext}"
           cp "dist/${{ matrix.exe }}" "$out"
           # checksum file the app's self-updater verifies the download against
           uv run python -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest(), sys.argv[1])" "$out" > "$out.sha256"
       - uses: actions/upload-artifact@v4
         with:
-          name: edh-dl-${{ matrix.name }}
-          path: edh-dl-${{ needs.version.outputs.tag }}-*
+          name: sks-dl-${{ matrix.name }}
+          path: sks-dl-${{ needs.version.outputs.tag }}-*
           if-no-files-found: error
 
   release:

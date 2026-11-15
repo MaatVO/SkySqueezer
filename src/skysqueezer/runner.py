@@ -159,7 +159,7 @@ def _self_cmd() -> list[str]:
         return [os.environ["APPIMAGE"]]
     if getattr(sys, "frozen", False):  # PyInstaller single-file executable
         return [sys.executable]
-    return [sys.executable, "-m", "edh_downloader"]
+    return [sys.executable, "-m", "skysqueezer"]
 
 
 def launch(job_dir: Path) -> int:

@@ -2,10 +2,10 @@
 
 import pytest
 
-from edh_downloader.job import AreaSpec, JobSpec, Point, TimeSpec
-from edh_downloader.planner import PlanError
-from edh_downloader.sources.cds import catalog
-from edh_downloader.sources.cds.planner import CdsPlan
+from skysqueezer.job import AreaSpec, JobSpec, Point, TimeSpec
+from skysqueezer.planner import PlanError
+from skysqueezer.sources.cds import catalog
+from skysqueezer.sources.cds.planner import CdsPlan
 
 ERA = "reanalysis-era5-single-levels"
 PL = "reanalysis-era5-pressure-levels"
@@ -198,7 +198,7 @@ def costing_calls(cds):
 
 
 def test_service_plan_learns_the_limit_and_checks_costs(cds):
-    from edh_downloader import service
+    from skysqueezer import service
 
     names = [v["name"] for v in catalog.describe(ERA)["variables"]][:20]
     s = spec(variables=names)
@@ -215,7 +215,7 @@ def test_service_plan_learns_the_limit_and_checks_costs(cds):
 
 
 def test_service_plan_shrinks_when_cds_counts_more(cds):
-    from edh_downloader import service
+    from skysqueezer import service
 
     cds.cost_factor = 2.0
     s = spec(start="2019-01-01")  # 89 280 fields: one request by the local count, 178 560 by the server's
@@ -226,7 +226,7 @@ def test_service_plan_shrinks_when_cds_counts_more(cds):
 
 
 def test_service_plan_without_a_key_or_licence(cds):
-    from edh_downloader import keys, service
+    from skysqueezer import keys, service
 
     cds.licences = []
     s = spec()
@@ -240,7 +240,7 @@ def test_service_plan_without_a_key_or_licence(cds):
 
 
 def test_service_plan_suggests_time_series_for_points(cds):
-    from edh_downloader import service
+    from skysqueezer import service
 
     s = spec(end="2020-01-31", area=AreaSpec(mode="points", points=[Point("a", 45.1, 11.2)]))
     assert service.plan(s.to_dict(), 8, True)["alternative"]["dataset"] == ERA + "-timeseries"
@@ -249,7 +249,7 @@ def test_service_plan_suggests_time_series_for_points(cds):
 # ------------------------------------------------------------------ the form: options that apply
 
 def test_only_the_options_that_apply_are_shown(cds):
-    from edh_downloader import service
+    from skysqueezer import service
 
     def names(sel):
         r = service.cds_options(CERRA, sel)
@@ -275,7 +275,7 @@ def test_an_option_chosen_for_another_kind_of_request_is_not_sent(cds):
 # ------------------------------------------------------------------ the store, before any download
 
 def test_the_store_is_previewed_from_the_plan(cds):
-    from edh_downloader import service
+    from skysqueezer import service
 
     s = spec(variables=["2m_temperature", "total_precipitation"], time={"freq": "day"})
     r = service.plan(s.to_dict(), 8, True)
@@ -290,7 +290,7 @@ def test_the_store_is_previewed_from_the_plan(cds):
 
 
 def test_cerra_preview_shows_the_whole_projected_domain(cds):
-    from edh_downloader import service
+    from skysqueezer import service
 
     s = spec(dataset=CERRA, variables=["2m_temperature"], end="2020-01-31",
              options={"level_type": "surface_or_atmosphere", "data_type": ["reanalysis"], "product_type": "analysis"})
@@ -298,15 +298,15 @@ def test_cerra_preview_shows_the_whole_projected_domain(cds):
     v = st["data"][0]
     assert v["dims"] == ("valid_time", "y", "x") and v["shape"] == (31 * 8, 1069, 1069)
     assert any("projected" in n for n in st["notes"])
-    from edh_downloader.gui import structure
+    from skysqueezer.gui import structure
     assert "<svg" in structure.cube_svg(v) and "y 1,069" in structure.cube_svg(v)
 
 
 def test_preview_uses_what_an_earlier_job_learned(cds):
     import numpy as np
 
-    from edh_downloader.sources.cds.grib import Grid
-    from edh_downloader.sources.cds.output import CdsOutput
+    from skysqueezer.sources.cds.grib import Grid
+    from skysqueezer.sources.cds.output import CdsOutput
 
     s = spec(variables=["2m_temperature"], end="2020-01-31")
     p = plan(s)

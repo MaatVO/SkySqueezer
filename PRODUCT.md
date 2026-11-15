@@ -12,7 +12,7 @@ Climate and weather researchers who need a subset of a weather or climate datase
 
 ## Product Purpose
 
-Weather Dataset Downloader turns "I need these variables, over this region and period, at this resolution" into an analysis-ready Icechunk or Zarr v3 store, without pulling whole datasets and without gambling the monthly API allowance.
+SkySqueezer turns "I need these variables, over this region and period, at this resolution" into an analysis-ready Icechunk or Zarr v3 store, without pulling whole datasets and without gambling the monthly API allowance.
 
 Success: a researcher configures one large job correctly the first time, knows what it will cost before it starts, walks away, and finds a complete, correct dataset when they come back.
 
@@ -32,7 +32,7 @@ The typical session is configure once, then check back: an occasional, careful s
 
 Workflow: configure the API key, select dataset and variables, set time and space selection, review the download plan, configure storage, start the job, monitor it in the Jobs tab.
 
-Users arrive through the standalone executable (which opens a connection page in the browser to pick an SSH host or run locally), through `edh-dl serve`, or through the SSH launcher. The browser may be closed and reopened at any point while jobs continue.
+Users arrive through the standalone executable (which opens a connection page in the browser to pick an SSH host or run locally), through `sks-dl serve`, or through the SSH launcher. The browser may be closed and reopened at any point while jobs continue.
 
 ## Capabilities and Constraints
 
@@ -48,7 +48,7 @@ Users arrive through the standalone executable (which opens a connection page in
 
 ## Brand Commitments
 
-- Product name: Weather Dataset Downloader (formerly EDH Downloader). CLI command: `edh-dl` (kept for compatibility).
+- Product name: SkySqueezer (formerly EDH Downloader, then Weather Dataset Downloader and WeatherFetch). CLI command: `sks-dl`.
 - The project is independently developed and must never be presented as an official Earth Data Hub or Copernicus application.
 - Licensed under Apache 2.0.
 

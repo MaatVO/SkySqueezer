@@ -5,8 +5,8 @@ import time
 
 import pytest
 
-from edh_downloader import runner, service
-from edh_downloader.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, TimeSpec
+from skysqueezer import runner, service
+from skysqueezer.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, TimeSpec
 
 
 def _spec(fake, home, name="dup"):
@@ -66,7 +66,7 @@ def test_log_tail_is_incremental(home):
 
 
 def test_structure_of_two_stores_is_not_recomputed_on_every_refresh(home, fake_edh, monkeypatch):
-    from edh_downloader.gui import structure
+    from skysqueezer.gui import structure
 
     a, b = home / "a.zarr", home / "b.zarr"
     for p in (a, b):

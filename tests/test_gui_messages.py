@@ -1,6 +1,6 @@
 """Wording helpers for failures and the disabled Launch button."""
 
-from edh_downloader.gui.messages import classify_error, dataset_error, display_version, launch_reason
+from skysqueezer.gui.messages import classify_error, dataset_error, display_version, launch_reason
 
 
 def test_classify_error():

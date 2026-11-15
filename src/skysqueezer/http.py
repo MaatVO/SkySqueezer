@@ -76,7 +76,7 @@ class EDHClient:
 
     async def __aenter__(self):
         self.session = aiohttp.ClientSession(
-            headers={"Authorization": f"Bearer {self.secret}", "User-Agent": "edh-downloader"},
+            headers={"Authorization": f"Bearer {self.secret}", "User-Agent": "skysqueezer"},
             timeout=aiohttp.ClientTimeout(total=self.timeout),
             connector=aiohttp.TCPConnector(limit=max(1, self.connections), ttl_dns_cache=600),
             trust_env=False,  # True would also inject ~/.netrc auth and clash with the Bearer header

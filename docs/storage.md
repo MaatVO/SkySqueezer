@@ -2,8 +2,8 @@
 
 Every gridded job writes into an [Icechunk](https://icechunk.io/) repository first, one transaction per unit.
 When every unit is in, the repository is exported to a plain [Zarr v3](https://zarr.dev/) store in the layout you
-chose. The code is in [store.py](../src/edh_downloader/store.py) and
-[chunking.py](../src/edh_downloader/chunking.py).
+chose. The code is in [store.py](../src/skysqueezer/store.py) and
+[chunking.py](../src/skysqueezer/chunking.py).
 
 ![Committed units go into the Icechunk repository in the staging layout; after the last unit a local,
 memory-bounded export writes the Zarr store in your layout; an Earth Data Hub job can also extend an existing
@@ -97,7 +97,7 @@ separate variable with the statistic appended (`t2m_mean`, `t2m_max`).
 
 Root attributes record where the data came from and how it was made: `title`, `source`, `source_dataset`,
 `provider`, `license`, `Conventions` (`CF-1.8`), `history`, and the provenance attributes `edh_job` (the whole
-job spec), `edh_plan` (the plan summary), `edh_job_id`, `edh_status`, `edh_downloader_version`, plus the
+job spec), `edh_plan` (the plan summary), `edh_job_id`, `edh_status`, `skysqueezer_version`, plus the
 requests and bytes the job used. Your `extra_attrs` are added too (names starting with `edh_` are reserved).
 
 ## Extending a store
@@ -115,14 +115,14 @@ Climate Data Store jobs cannot extend a store yet.
 ```python
 import xarray as xr
 
-ds = xr.open_zarr("~/edh-data/era5_subset.zarr")
+ds = xr.open_zarr("~/sks-data/era5_subset.zarr")
 ```
 
 ```python
 import icechunk
 import xarray as xr
 
-repo = icechunk.Repository.open(icechunk.local_filesystem_storage("~/edh-data/era5_subset.icechunk"))
+repo = icechunk.Repository.open(icechunk.local_filesystem_storage("~/sks-data/era5_subset.icechunk"))
 ds = xr.open_zarr(repo.readonly_session("main").store, consolidated=False)
 ```
 

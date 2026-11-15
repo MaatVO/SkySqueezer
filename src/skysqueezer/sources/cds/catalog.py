@@ -10,14 +10,14 @@ licences must be accepted, and how far the app can take the data (``tier``):
 * ``timeseries``: one time series per point (``location`` field);
 * ``table``: in-situ observations (tables, not grids).
 
-Everything is cached for a day; offline (``EDH_DL_OFFLINE``) the cache is used even when old.
+Everything is cached for a day; offline (``SKS_DL_OFFLINE``) the cache is used even when old.
 """
 
 import asyncio
 import os
 import time
 
-from ...paths import cache_dir
+from ...paths import cache_dir, env
 from ...util import read_json, write_json_atomic
 from . import api
 
@@ -47,9 +47,9 @@ def _cached(name: str, fetch, refresh: bool = False):
     path = cache_dir() / name
     d = read_json(path)
     fresh = d is not None and time.time() - d.get("t", 0) < TTL
-    if d is not None and (os.environ.get("EDH_DL_OFFLINE") or (fresh and not refresh)):
+    if d is not None and (env("OFFLINE") or (fresh and not refresh)):
         return d["v"]
-    if os.environ.get("EDH_DL_OFFLINE"):
+    if env("OFFLINE"):
         raise RuntimeError(f"offline mode: {name} is not cached")
     try:
         v = asyncio.run(fetch())

@@ -12,9 +12,9 @@ build-linux:
     - bash packaging/build.sh
 
   artifacts:
-    name: "edh-dl-${CI_COMMIT_TAG}"
+    name: "sks-dl-${CI_COMMIT_TAG}"
     paths:
-      - dist/edh-dl
+      - dist/sks-dl
     expire_in: 30 days
 
   rules:

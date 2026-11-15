@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from edh_downloader.gui.app import (job_error_text, job_forecast, job_group, job_note, job_percent, job_resume_cost,
+from skysqueezer.gui.app import (job_error_text, job_forecast, job_group, job_note, job_percent, job_resume_cost,
                                     job_rollup_html, jobs_stale_html, open_snippet, time_ago)
 
 
@@ -118,7 +118,7 @@ def test_stale_line_says_how_old():
 
 
 def test_cds_job_notes_talk_about_the_queue_not_the_quota():
-    from edh_downloader.gui.app import job_forecast, job_note, job_resume_cost
+    from skysqueezer.gui.app import job_forecast, job_note, job_resume_cost
 
     s = {"spec": {"source": "cds"}, "status": "paused", "units_total": 4,
          "cds_requests": {"done": 1, "queued": 2, "planned": 3}, "message": "1/4 units committed"}

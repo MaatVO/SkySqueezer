@@ -92,13 +92,13 @@ class FakeEDH:
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
-    for v, d in (("EDH_DL_CONFIG_DIR", "cfg"), ("EDH_DL_DATA_DIR", "data"), ("EDH_DL_CACHE_DIR", "cache")):
+    for v, d in (("SKS_DL_CONFIG_DIR", "cfg"), ("SKS_DL_DATA_DIR", "data"), ("SKS_DL_CACHE_DIR", "cache")):
         monkeypatch.setenv(v, str(tmp_path / d))
     monkeypatch.setenv("NETRC", str(tmp_path / "no-netrc"))
     monkeypatch.setenv("CDSAPI_RC", str(tmp_path / "no-cdsapirc"))  # never the user's real CDS token
     monkeypatch.delenv("CDSAPI_URL", raising=False)
     monkeypatch.delenv("CDSAPI_KEY", raising=False)
-    from edh_downloader import keys
+    from skysqueezer import keys
 
     keys.add_key("test", "test-key", quota=100_000)
     yield tmp_path
@@ -115,7 +115,7 @@ def _stop_workers(timeout: float = 30.0):
     import signal
     import time
 
-    from edh_downloader import runner
+    from skysqueezer import runner
 
     try:
         jobs = runner.list_jobs()
@@ -164,12 +164,12 @@ def cds(fake_cds_server, home, monkeypatch):
     """A fresh fake Climate Data Store, which the app uses instead of the real one, and a CDS key for it."""
     from fake_cds import TOKEN
 
-    from edh_downloader import keys
+    from skysqueezer import keys
 
     fake_cds_server.reset()
-    from edh_downloader import service
+    from skysqueezer import service
 
     service._CDS_COSTS.clear()
-    monkeypatch.setenv("EDH_DL_CDS_API", fake_cds_server.api)
+    monkeypatch.setenv("SKS_DL_CDS_API", fake_cds_server.api)
     keys.add_key("cds-test", TOKEN, provider="cds")
     return fake_cds_server

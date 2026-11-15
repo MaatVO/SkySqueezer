@@ -9,8 +9,8 @@ exchange JSON requests](diagrams/remote-connect.svg)
 
 ## The connection
 
-[remote.py](../src/edh_downloader/remote.py) uses [AsyncSSH](https://asyncssh.readthedocs.io/), so no `ssh`
-binary is needed, on Windows either. [sshconfig.py](../src/edh_downloader/sshconfig.py) reads `~/.ssh/config`, so
+[remote.py](../src/skysqueezer/remote.py) uses [AsyncSSH](https://asyncssh.readthedocs.io/), so no `ssh`
+binary is needed, on Windows either. [sshconfig.py](../src/skysqueezer/sshconfig.py) reads `~/.ssh/config`, so
 aliases, users, ports, identity files, certificates and `ProxyJump` work as they do with `ssh`.
 
 - **Authentication:** key (with its passphrase when needed), SSH agent, or password. Passwords and passphrases
@@ -22,11 +22,11 @@ aliases, users, ports, identity files, certificates and `ProxyJump` work as they
 
 The server needs Python 3.12 or newer. Everything else is set up by the app:
 
-1. **A virtual environment** in `~/.local/share/edh-dl/venv-<deps id>`, where the id is a hash of the dependency
+1. **A virtual environment** in `~/.local/share/sks-dl/venv-<deps id>`, where the id is a hash of the dependency
    list. It is created once, with `uv` when the server has it, otherwise `python3 -m venv` and `pip`. It needs
    internet access on the server, and the app asks before creating it. A new dependency list gets a new
    environment; an old one is not touched.
-2. **The code** as a small zip, `agent/<build id>.zip` ([bundle.py](../src/edh_downloader/bundle.py)): the app's
+2. **The code** as a small zip, `agent/<build id>.zip` ([bundle.py](../src/skysqueezer/bundle.py)): the app's
    Python files, a few hundred KB. The build id is a hash of the content, so the zip is uploaded only when your
    app's code differs from what the server already has.
 3. **Capabilities.** The app checks what the environment can import beyond the required packages: ecCodes (GRIB)
@@ -34,12 +34,12 @@ The server needs Python 3.12 or newer. Everything else is set up by the app:
 
 ## The agent
 
-The server then runs `python -m edh_downloader agent` with `PYTHONPATH` set to the zip
-([agent.py](../src/edh_downloader/agent.py)). The agent:
+The server then runs `python -m skysqueezer agent` with `PYTHONPATH` set to the zip
+([agent.py](../src/skysqueezer/agent.py)). The agent:
 
 - sends one `hello` line (its version and capabilities);
 - reads JSON requests on stdin and answers on stdout, one per line. Each request names a function of
-  [service.py](../src/edh_downloader/service.py) and its arguments;
+  [service.py](../src/skysqueezer/service.py) and its arguments;
 - runs each request in a thread, so a long one (a download sample) does not block the others;
 - ends when the connection closes.
 
@@ -56,28 +56,28 @@ the app or your computer ends the agent, not the jobs. Reconnecting shows them a
 
 ## Several connections
 
-The connect shell ([gui/connect.py](../src/edh_downloader/gui/connect.py)) shows one tab per connection: "This
+The connect shell ([gui/connect.py](../src/skysqueezer/gui/connect.py)) shows one tab per connection: "This
 computer" and each server, each in its own frame. Tabs are independent; quitting the app closes every connection
 and leaves every job running.
 
 ## Without the app: the launcher
 
-When you prefer not to run the app locally, the server's own `edh-dl` serves the web UI and a small script on your
-computer opens it ([launcher.py](../src/edh_downloader/launcher.py)):
+When you prefer not to run the app locally, the server's own `sks-dl` serves the web UI and a small script on your
+computer opens it ([launcher.py](../src/skysqueezer/launcher.py)):
 
 ```bash
-ssh me@server '/path/to/edh-dl launcher sh' > edh-connect && chmod +x edh-connect
+ssh me@server '/path/to/sks-dl launcher sh' > edh-connect && chmod +x edh-connect
 ./edh-connect                       # or ./edh-connect other@host
 ```
 
 ```powershell
-ssh me@server "/path/to/edh-dl launcher ps1" > edh-connect.ps1
+ssh me@server "/path/to/sks-dl launcher ps1" > edh-connect.ps1
 powershell -ExecutionPolicy Bypass -File edh-connect.ps1
 ```
 
-The script needs only `ssh`. It starts `edh-dl serve` on the server, picks free ports on both ends, opens the
+The script needs only `ssh`. It starts `sks-dl serve` on the server, picks free ports on both ends, opens the
 tunnel, passes a fresh access token through the SSH connection (never on a command line others could read), and
 opens the browser. Closing it stops the web UI; jobs keep running.
 
-`edh-dl serve` on its own prints the `ssh -L` command for a manual tunnel. The web UI requires its access token
+`sks-dl serve` on its own prints the `ssh -L` command for a manual tunnel. The web UI requires its access token
 unless started with `--no-token`.

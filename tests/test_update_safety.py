@@ -13,11 +13,11 @@ import sys
 import time
 import zipfile
 
-from edh_downloader import bundle
+from skysqueezer import bundle
 
 
 def _agent(zip_path, cwd):
-    p = subprocess.Popen([sys.executable, "-m", "edh_downloader", "agent"], stdin=subprocess.PIPE,
+    p = subprocess.Popen([sys.executable, "-m", "skysqueezer", "agent"], stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, start_new_session=True,
                          cwd=str(cwd), env=dict(os.environ, PYTHONPATH=str(zip_path), PYTHONDONTWRITEBYTECODE="1"))
     assert "hello" in json.loads(p.stdout.readline())
@@ -46,7 +46,7 @@ def test_job_survives_disconnect_and_app_update(home, fake_edh, tmp_path):
     with zipfile.ZipFile(io.BytesIO(a)) as zin, zipfile.ZipFile(buf, "w") as z:
         for i in zin.infolist():
             z.writestr(i, zin.read(i))
-        z.writestr("edh_downloader/_new_build.py", "")
+        z.writestr("skysqueezer/_new_build.py", "")
     (tmp_path / "B.zip").write_bytes(buf.getvalue())
 
     spec = {"dataset": "fake", "dataset_url": slow.url, "variables": ["t2m", "tp"],
@@ -85,8 +85,8 @@ def test_job_survives_disconnect_and_app_update(home, fake_edh, tmp_path):
 def test_worker_imports_nothing_after_it_started(home, fake_edh, monkeypatch):
     """The packaged executable reads its modules from its own file, by path, on import: a self-update replaces
     that file. A job survives it only if its worker imports nothing once the download runs (also export)."""
-    from edh_downloader import engine, runner
-    from edh_downloader.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, Point, TimeSpec
+    from skysqueezer import engine, runner
+    from skysqueezer.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, Point, TimeSpec
 
     snap = {}
     orig = engine.Engine._process_unit

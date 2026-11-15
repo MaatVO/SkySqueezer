@@ -28,6 +28,8 @@ from ..job import COMPRESSORS, FREQS, STATS, AreaSpec, CdsSpec, DownloadSpec, Jo
 from ..util import human_bytes, human_duration
 from . import logo, structure, tour
 from .auth import TokenMiddleware
+from .fold import Fold
+from .steps import REQUIRED as STEP_REQUIRED, STATUS as STEP_STATUS, TITLES as STEP_TITLES, step_states
 from .theme import PINK, apply_theme
 
 STRUCT_KEYS = ("id", "status", "alive", "error", "outputs", "outputs_exist", "spec")
@@ -40,6 +42,7 @@ JOB_GROUPS = (("needs attention", "need attention", {"failed", "interrupted", "u
               ("waiting for quota", "waiting for quota", {"waiting_quota", "paused_quota"}),
               ("stopped", "stopped", {"paused", "created", "cancelled"}),
               ("completed", "completed", {"completed"}))
+TONE = {"positive": "ok", "negative": "err", "warning": "warn", "grey-6": "muted"}  # a status colour on a fold
 JOB_GROUP_STOPPED = 3  # where a status the groups don't know is counted
 STATUS_ICON = {"starting": "hourglass_top", "running": "downloading", "exporting": "output", "completed": "check_circle",
                "failed": "error", "interrupted": "report", "unreadable": "help", "paused": "pause_circle",
@@ -377,23 +380,6 @@ def parse_attrs(text: str) -> dict:
     return out
 
 
-@contextmanager
-def section(n, title: str, subtitle: str = "", wide: bool = False, icon: str | None = None, mark: str = ""):
-    """A numbered card; ``mark`` names it for the guided tour (class ``edh-tour-<mark>``)."""
-    with ui.card().classes("edh-card w-full min-w-0" + (" col-span-2 max-xl:col-span-1" if wide else "")
-                           + (f" edh-tour-{mark}" if mark else "")):
-        with ui.row().classes("items-center gap-2 no-wrap w-full"):
-            ui.html(f'<div class="edh-step">{n}</div>', sanitize=False)
-            if icon:
-                ui.icon(icon, size="20px").classes("edh-muted")
-            with ui.column().classes("gap-0"):
-                ui.label(title).classes("edh-title").props("role=heading aria-level=2")
-                if subtitle:
-                    ui.label(subtitle).classes("edh-muted text-body2")
-        with ui.column().classes("w-full gap-3 pt-1"):
-            yield
-
-
 class IconToggle(ui.toggle):
     """A segmented toggle whose segments carry an icon: ``options`` maps value -> (label, icon)."""
 
@@ -612,7 +598,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
         with ui.row().classes("items-center gap-3 no-wrap"):
             ui.html(logo.img(), sanitize=False)
             with ui.column().classes("gap-0"):
-                ui.label("Weather Dataset Downloader").classes("edh-brand").props("role=heading aria-level=1")
+                ui.label("SkySqueezer").classes("edh-brand").props("role=heading aria-level=1")
                 ui.label(f"Earth Data Hub and Climate Data Store → Icechunk / Zarr · v{display_version(__version__)}").classes("edh-muted text-caption max-sm:hidden")
         with ui.tabs().props("no-caps dense indicator-color=transparent active-class=edh-tab-active"
                              ).classes("edh-tabs edh-tour-tabs") as tabs:
@@ -698,6 +684,59 @@ def build_page(be, local: bool = False, embedded: bool = False):
 
     dialog_host = ui.element("div")  # pop-ups live here, outside the cards that are rebuilt on refresh
 
+    # ------------------------------------------------------------------ New job steps: one open at a time
+    step_folds: dict[int, Fold] = {}
+    step_defaults = dict(f)  # a step still as the app started it reads "Defaults"
+
+    def open_step(n: int | None, scroll: bool = False):
+        for k, fo in step_folds.items():
+            fo.set_open(k == n)
+        refresh_steps()
+        if n == 4:  # Leaflet measured its box while it was hidden
+            later(lambda: (area_map.run_map_method("invalidateSize"), center_map()), 0.05)
+        if n and scroll:
+            step_folds[n].scroll_into_view()
+
+    def review_summary():
+        open_step(None)
+        ui.run_javascript("document.querySelector('.edh-summary')?.scrollIntoView({block: 'start', behavior: "
+                          "matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'})")
+
+    @contextmanager
+    def step(n: int, mark: str):
+        """A numbered New job step: a fold whose header sums up what is set, with Continue at the bottom."""
+        fo = Fold(STEP_TITLES[n], badge=str(n), mark=mark, on_click=lambda _: open_step(n), opened=n == 1,
+                  actions=("Edit", ""), hide_line_open=True, title_classes="edh-fold-grow")
+        fo.root.classes(add="edh-fold-pinned")
+        step_folds[n] = fo
+        with fo.body:
+            yield
+            with ui.row().classes("edh-fold-foot w-full items-center justify-between gap-3"):
+                ui.label(f"Step {n} of {len(STEP_TITLES)}").classes("edh-muted text-caption")
+                if n < len(STEP_TITLES):
+                    ui.button(f"Continue to {STEP_TITLES[n + 1]}", on_click=lambda: open_step(n + 1, scroll=True)
+                              ).props("outline no-caps color=primary")
+                else:
+                    ui.button("Review the summary", on_click=review_summary).props("outline no-caps color=primary")
+
+    def refresh_steps():
+        if len(step_folds) < len(STEP_TITLES):
+            return
+        info = ctx.get("info") or {}
+        states = step_states(f, step_defaults, title=ds_title.text or None,
+                             loaded=bool(ctx.get("ds")) and info.get("id") == f["dataset"],
+                             failed=ds_err.visible, has_key=bool(f.get("key")))
+        for n, (state, line) in states.items():
+            fo = step_folds[n]
+            status, tone = STEP_STATUS[state]
+            mark_ = "" if fo.opened else {"done": "done", "error": "warn"}.get(state, "")
+            fo.set(line=line, set_line=state in ("done", "defaults", "pending"), status=status, tone=tone,
+                   tag="required" if n in STEP_REQUIRED and state == "todo" else "",
+                   badge="active" if fo.opened else mark_,
+                   icon={"done": "check", "warn": "priority_high"}.get(mark_))
+
+    ui.timer(0.5, refresh_steps)
+
     with ui.tab_panels(tabs, value=t_new).classes("edh-panels w-full"):
         # ================================================================ NEW JOB
         with ui.tab_panel(t_new).classes("px-0"):
@@ -725,10 +764,11 @@ def build_page(be, local: bool = False, embedded: bool = False):
             missing_key_banner.set_visibility(False)
 
             with ui.row().classes("w-full no-wrap items-start gap-5 max-lg:flex-wrap"):
-                with ui.element("div").classes("grid grid-cols-2 max-xl:grid-cols-1 gap-5 grow min-w-0 content-start"):
-                    with ui.column().classes("gap-5 min-w-0 w-full"):
+                # one column of folds; the two inner divs are display:contents, so all five steps stack in it
+                with ui.element("div").classes("edh-folds grow"):
+                    with ui.element("div").classes("contents"):
                         # ---------- dataset
-                        with section(1, "Dataset", icon="dataset", mark="dataset"):
+                        with step(1, mark="dataset"):
                             src_toggle = IconToggle({"edh": ("Earth Data Hub", "hub"),
                                                      "cds": ("Climate Data Store", "cloud_queue")}, value="edh").props(
                                 "unelevated toggle-color=primary no-caps").classes("edh-toggle edh-tour-source")
@@ -750,7 +790,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
                             cds_box.set_visibility(False)
 
                         # ---------- variables
-                        with section(2, "Variables and levels", icon="layers", mark="variables"):
+                        with step(2, mark="variables"):
                             with ui.row().classes("w-full items-center justify-between"):
                                 var_search = ui.input(placeholder="Search variables…").props("dense outlined clearable").classes("w-80")
                                 with var_search.add_slot("prepend"):
@@ -774,9 +814,9 @@ def build_page(be, local: bool = False, embedded: bool = False):
                                 ui.button("None", on_click=lambda: level_select.set_value([])).props("flat dense")
                             level_row.set_visibility(False)
 
-                    with ui.column().classes("gap-5 min-w-0 w-full"):
+                    with ui.element("div").classes("contents"):
                         # ---------- time
-                        with section(3, "Time", icon="date_range", mark="time"):
+                        with step(3, mark="time"):
                             hour_inputs = []
                             with ui.row().classes("items-center gap-4"):
                                 for key_, label, hkey in (("start", "First day", "start_hour"), ("end", "Last day", "end_hour")):
@@ -817,7 +857,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
                             stats_box = ui.column().classes("gap-2")
 
                         # ---------- area
-                        with section(4, "Area", icon="map", mark="area"):
+                        with step(4, mark="area"):
                             with ui.row().classes("items-center gap-5"):
                                 area_toggle = IconToggle({"global": ("Global", "public"), "bbox": ("Box", "crop_free"),
                                                           "points": ("Points", "place")}).bind_value(
@@ -874,7 +914,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
                             area_note.set_visibility(False)
 
                     # ---------- output
-                    with section(5, "Output", wide=True, icon="folder", mark="output"):
+                    with step(5, mark="output"):
                         # what goes in and what comes out: input format -> staging -> output (render_flow)
                         flow_box = ui.row().classes("w-full items-stretch gap-2 no-wrap max-md:flex-wrap edh-flow")
                         files_note = ui.label().classes("text-body2 text-accent")
@@ -1082,7 +1122,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
             ui.label("Jobs").classes("sr-only").props("role=heading aria-level=2")
             jobs_rollup = ui.html("", sanitize=False).classes("text-body2 pb-3")
             jobs_announce = ui.label("").classes("sr-only").props("role=status aria-live=polite")
-            jobs_box = ui.column().classes("w-full gap-4")
+            jobs_box = ui.column().classes("w-full gap-2")
 
         # ================================================================ KEYS
         with ui.tab_panel(t_keys).classes("px-0 edh-tour-keys"):
@@ -2220,6 +2260,8 @@ def build_page(be, local: bool = False, embedded: bool = False):
     last_jobs: dict = {}  # job id -> its latest status (the request table reads its live downloads)
     struct_states: dict = {}  # job id -> {"var": ..., "src": ...}
     job_states: dict = {}  # job id -> last status, to announce changes
+    job_folds: dict = {}  # job id -> its Fold (header: status and progress; body: the card)
+    job_open: dict = {}  # job id -> open or closed by the user; otherwise jobs that need a look are open
 
     async def load_thumbs(collection):
         """Images for job cards; a card without one just shows the globe, so a failure here is not reported."""
@@ -2286,9 +2328,18 @@ def build_page(be, local: bool = False, embedded: bool = False):
                     with ui.card().classes("edh-card w-full items-center py-10"):
                         ui.icon("inbox", size="xl", color="grey-6")
                         ui.label("No jobs yet. Create one in New job.").classes("edh-muted")
+                job_folds.clear()
                 for s_ in jobs:
-                    cards[s_["id"]] = (None, ui.card().classes("edh-card w-full"), None, None)
+                    jid = s_["id"]
+                    fo = Fold(jid, icon="help", level=3, title_classes="edh-mono", actions=("Details", "Hide"),
+                              hide_line_open=True,
+                              on_click=lambda fo, j=jid: (job_open.__setitem__(j, not fo.opened),
+                                                          fo.set_open(not fo.opened)),
+                              opened=job_open.get(jid, job_group(s_.get("status")) <= 2))
+                    job_folds[jid] = fo
+                    cards[jid] = (None, fo.body, None, None)
         for s_ in jobs:
+            _job_header(job_folds[s_["id"]], s_)
             # structure (buttons, inputs) is rebuilt only when it changes; live numbers are redrawn in place, so
             # what the user is typing (e.g. connections) survives the refresh
             sig = json.dumps({k: s_.get(k) for k in (*STRUCT_KEYS, "_thumb")}, sort_keys=True, default=str) + \
@@ -2396,13 +2447,9 @@ def build_page(be, local: bool = False, embedded: bool = False):
 
     def _job_live(s):
         st = s.get("status", "?")
-        total = s.get("units_total") or 0
-        done = len(s.get("units_done", []))
+        done, total = _job_progress(s)
         cds = is_cds(s)
         counts = s.get("cds_requests") or {}
-        if cds and not total:  # files-only job: progress is files downloaded
-            total = s.get("requests_total") or 0
-            done = counts.get("downloaded", 0) + counts.get("done", 0)
         color = STATUS_COLOR.get(st, "grey-6")
         tail, forecast = job_forecast(s) if st == "running" else ("", "")
         with ui.row().classes("w-full items-baseline justify-between no-wrap gap-4"):
@@ -2523,6 +2570,31 @@ def build_page(be, local: bool = False, embedded: bool = False):
 
                     ui.button("Apply", on_click=apply).props("flat no-caps")
 
+    def _job_progress(s) -> tuple[int, int]:
+        """Units done and in total; a CDS files-only job counts files downloaded."""
+        total = s.get("units_total") or 0
+        done = len(s.get("units_done", []))
+        if is_cds(s) and not total:
+            counts = s.get("cds_requests") or {}
+            total = s.get("requests_total") or 0
+            done = counts.get("downloaded", 0) + counts.get("done", 0)
+        return done, total
+
+    def _job_line(spec: dict) -> str:
+        if not spec:
+            return "job definition unreadable"
+        tt = spec.get("time") or {}
+        return (f"{spec.get('dataset')} · {', '.join(spec.get('variables') or [])} · {tt.get('start')} → {tt.get('end')}"
+                + ("" if tt.get("freq") in (None, "none") else f" · {FREQS.get(tt['freq'], tt['freq'])}"))
+
+    def _job_header(fo: Fold, s):
+        st = s.get("status", "?")
+        done, total = _job_progress(s)
+        tone = TONE.get(STATUS_COLOR.get(st, "grey-6"), "muted")
+        fo.set(icon=STATUS_ICON.get(st, "help"), badge=f"plain {tone}", tone=tone, line=_job_line(s.get("spec") or {}),
+               status=job_status_label(st) + (f" · {job_percent(done, total)}"
+                                              if total and (st in ACTIVE or 0 < done < total) else ""))
+
     def _job_card(s):
         """The card; returns its live part (progress, numbers), which refreshes on its own."""
         st = s.get("status", "?")
@@ -2531,16 +2603,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
             with ui.row().classes("w-full items-center gap-3 no-wrap min-w-0"):
                 if spec:
                     dataset_image(s.get("_thumb"), "", "edh-thumb-md")  # the caption beside it names the dataset
-                with ui.column().classes("grow gap-0 min-w-0"):
-                    ui.label(s["id"]).classes("text-subtitle1 edh-mono break-all").props("role=heading aria-level=3")
-                    tt = spec.get("time") or {}
-                    if spec:
-                        ui.label(f"{spec.get('dataset')} · {', '.join(spec.get('variables') or [])} · "
-                                 f"{tt.get('start')} → {tt.get('end')}"
-                                 + ("" if tt.get("freq") in (None, "none") else f" · {FREQS.get(tt['freq'], tt['freq'])}")
-                                 ).classes("edh-muted text-caption")
-                    else:
-                        ui.label("job definition unreadable").classes("edh-muted text-caption")
+                ui.label(_job_line(spec)).classes("edh-muted text-caption grow min-w-0 break-words")
             live = ui.column().classes("w-full gap-2")
             with live:
                 _job_live(s)
@@ -2737,24 +2800,34 @@ def build_page(be, local: bool = False, embedded: bool = False):
                     ui.label(src["title"]).classes("text-h6").props("role=heading aria-level=2")
                     if not src.get("jobs", True):
                         ui.label("downloads coming soon: keys can be added already").classes("edh-muted text-caption")
-                key_form(src)
                 mine = [k for k in d["keys"] if k.get("provider", "edh") == pid]
-                if not mine:
-                    ui.label(f"No {src['short']} key yet.").classes("edh-muted text-body2")
-                for k in mine:
-                    key_card(k, src, defaults.get(pid))
+                with ui.element("div").classes("edh-folds"):
+                    for k in mine:
+                        key_card(k, src, defaults.get(pid))
+                    key_form(src, bool(mine))
                 if src.get("has_quota", pid == "edh") and mine:
                     ui.markdown("Earth Data Hub doesn't report your usage to API clients: the app counts its own "
                                 f"requests. Open the [quota page]({QUOTA_URL}), then enter the number shown there in "
                                 "**Calibrate** (includes requests from other tools), or the limit of your plan in "
                                 "**Set quota**.").classes("edh-muted text-caption")
 
-    def key_form(src: dict):
+    def key_fold(title: str, opened_key: tuple, opened: bool, **kw) -> Fold:
+        """A fold on Keys; whether it is open survives the list being rebuilt after every change."""
+        open_ = ctx.setdefault("key_open", {})
+        return Fold(title, opened=open_.get(opened_key, opened),
+                    on_click=lambda fo: (open_.__setitem__(opened_key, not fo.opened), fo.set_open(not fo.opened)), **kw)
+
+    def key_form(src: dict, has_keys: bool):
         pid = src["id"]
         quota_kept = src.get("has_quota", pid == "edh")
-        with section("+", "Add an API key", mark="keys-add" if pid == "edh" else ""):
+        site = src["key_url"].split("//")[-1].split("/")[0]
+        fo = key_fold("Add an API key" if quota_kept else "Add a personal access token", (pid, "+"), not has_keys,
+                      badge="+", level=3, mark="keys-add" if pid == "edh" else "", actions=("Add", "Hide"),
+                      hide_line_open=True)
+        fo.set(line=f"Get one on {site}" if has_keys else f"No {src['short']} key yet: get one on {site}")
+        with fo.body:
             ui.markdown(f"Get a key on [{src['key_url'].split('//')[-1].split('/')[0]}]({src['key_url']}). It is "
-                        "stored on the machine that runs the downloads, in `~/.config/edh-dl/keys.json` (only you "
+                        "stored on the machine that runs the downloads, in `~/.config/sks-dl/keys.json` (only you "
                         f"can read it); {src['key_hint']}").classes("text-body2 edh-muted")
             with ui.row().classes("items-center gap-3 w-full no-wrap max-md:flex-wrap"):
                 name_in = ui.input("Name", placeholder="personal").classes("w-44")
@@ -2782,13 +2855,20 @@ def build_page(be, local: bool = False, embedded: bool = False):
                 ui.button("Add", icon="add", on_click=add).props("unelevated no-caps").classes("edh-primary-btn")
 
     def key_card(k: dict, src: dict, default: str | None):
-        with ui.card().classes("edh-card w-full"):
+        q = k.get("usage")
+        fo = key_fold(k["name"], (src["id"], k["name"]), False, icon="vpn_key", level=3, actions=("Manage", "Hide"))
+        fo.set(badge="plain", tag="default" if k["name"] == default else "", set_line=True,
+               line=f"{k['source']} · id {k['fingerprint']}" + (
+                   f" · {q['used']:,} of {k['quota']:,} requests in {q['month']} · resets {q['resets'][:10]}" if q else ""))
+        if q:
+            pct = q["used"] / k["quota"] if k["quota"] else 0
+            fo.set(status=f"{100 * pct:.0f}% used", tone="err" if pct > 0.9 else "warn" if pct > 0.7 else "ok")
+        else:
+            fo.set(status="No quota", tone="muted")
+        with fo.body:
             with ui.row().classes("w-full items-center justify-between"):
-                with ui.row().classes("items-center gap-2"):
-                    ui.icon("vpn_key", color="secondary")
-                    ui.label(k["name"]).classes("text-h6")
-                    ui.label(f"{'default · ' if k['name'] == default else ''}{k['source']} · id {k['fingerprint']}"
-                             ).classes("edh-muted text-caption")
+                ui.label(f"{'Default key · ' if k['name'] == default else ''}{k['source']} · id {k['fingerprint']}"
+                         ).classes("edh-muted text-caption")
                 with ui.row().classes("gap-1"):
                     if k["name"] != default:
                         async def make_default(n=k["name"]):
@@ -2815,7 +2895,6 @@ def build_page(be, local: bool = False, embedded: bool = False):
                         ui.button(icon="delete_outline", on_click=lambda n=k["name"]: confirm(
                             f"Remove key {n}?", lambda n=n: remove(n))).props('flat round color=grey-6 aria-label="Remove key"').tooltip(
                             "Remove key")
-            q = k.get("usage")
             if not q:
                 ui.label("No monthly request quota: the Climate Data Store limits the size of each request and "
                          "queues them instead.").classes("edh-muted text-caption")
@@ -2884,7 +2963,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
             if stage == tour.APP:  # the connect part was followed: carry on straight away
                 tour.set_stage(tour.DONE)
                 run_tour()
-            else:  # edh-dl serve / connect: no connect page, so offer the tour here
+            else:  # sks-dl serve / connect: no connect page, so offer the tour here
                 tour.welcome(on_start=run_tour, on_skip=lambda: tour.set_stage(tour.DONE), connect=False,
                              replay="the Tour button in the header")
 
@@ -3010,7 +3089,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, token: bool = True, stdio: 
     if stdio:
         _stdio_threads(port)
     else:
-        print("Weather Dataset Downloader web UI")
+        print("SkySqueezer web UI")
         print(f"  {url}")
         if over_ssh:
             h = default_host()
@@ -3024,5 +3103,5 @@ def serve(host: str = "127.0.0.1", port: int = 8765, token: bool = True, stdio: 
         else:
             show = path if open_browser is not False else False
         print("  Jobs keep running after you stop this server (Ctrl+C) or disconnect.", flush=True)
-    ui.run(host=host, port=port, title="Weather Dataset Downloader", show=show, reload=False, favicon=logo.PNG_DATA_URL, dark=True,
+    ui.run(host=host, port=port, title="SkySqueezer", show=show, reload=False, favicon=logo.PNG_DATA_URL, dark=True,
            show_welcome_message=False, storage_secret=secrets.token_hex(16), uvicorn_logging_level="warning")

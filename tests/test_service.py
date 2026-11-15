@@ -1,7 +1,7 @@
 import asyncio
 
-from edh_downloader import backend, bundle
-from edh_downloader.job import AreaSpec, JobSpec, TimeSpec
+from skysqueezer import backend, bundle
+from skysqueezer.job import AreaSpec, JobSpec, TimeSpec
 
 
 def test_plan_and_jobs_through_the_backend(home, fake_edh):
@@ -40,7 +40,7 @@ def test_agent_bundle_is_small_and_deterministic():
 
 
 def test_list_dirs_for_the_folder_picker(tmp_path):
-    from edh_downloader import service
+    from skysqueezer import service
 
     (tmp_path / "b_out").mkdir()
     (tmp_path / "A_out").mkdir()

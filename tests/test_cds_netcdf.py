@@ -11,11 +11,11 @@ import xarray as xr
 from fake_cds import nc_times, value
 from test_cds_engine import fast, spec  # noqa: F401  (fixture)
 
-from edh_downloader import runner
-from edh_downloader.job import AreaSpec
-from edh_downloader.runner import create_job, run_foreground
-from edh_downloader.sources.cds import engine as cds_engine
-from edh_downloader.sources.cds import netcdf
+from skysqueezer import runner
+from skysqueezer.job import AreaSpec
+from skysqueezer.runner import create_job, run_foreground
+from skysqueezer.sources.cds import engine as cds_engine
+from skysqueezer.sources.cds import netcdf
 
 CMIP = "projections-cmip6"
 OPTS = {"temporal_resolution": "monthly", "experiment": "historical", "model": "access_cm2"}
@@ -128,7 +128,7 @@ def test_paused_during_conversion_resumes(home, fast, monkeypatch):
 
 
 def test_points_from_netcdf(home, fast):
-    from edh_downloader.job import Point
+    from skysqueezer.job import Point
 
     s = cmip(home, end="2000-03-31", area=AreaSpec(mode="points", points=[Point("a", 45.2, 10.1),
                                                                           Point("b", 46.9, 11.8)]))

@@ -20,7 +20,7 @@ sources/cds/catalog.py -> planner.py -> engine.py (+ client.py) -> grib.py / net
 
 ## 1. Catalogue: forms and constraints
 
-[sources/cds/catalog.py](../src/edh_downloader/sources/cds/catalog.py) reads the public catalogue (no token):
+[sources/cds/catalog.py](../src/skysqueezer/sources/cds/catalog.py) reads the public catalogue (no token):
 
 - `form.json`, the widgets of a dataset's download form;
 - `constraints.json`, the value combinations that exist.
@@ -42,7 +42,7 @@ dataset does not have. Everything is cached for a day.
 
 ## 2. Plan: the fewest requests
 
-[sources/cds/planner.py](../src/edh_downloader/sources/cds/planner.py)
+[sources/cds/planner.py](../src/skysqueezer/sources/cds/planner.py)
 
 A CDS request is a cartesian product: years × months × days × times × variables × levels. Its cost is its number
 of fields, and each dataset has a limit (121,000 fields for ERA5 single levels, 60,000 for ERA5 pressure levels;
@@ -86,11 +86,11 @@ Before the job starts, and again when it plans (`fit_costs`):
 - **Licences:** the licences your account has accepted are compared with those the dataset needs. A job that
   would be rejected does not start, and the UI links to the dataset page where you accept them.
 
-`edh-dl plan job.json` prints the requests, their cost and any problem, and costs nothing.
+`sks-dl plan job.json` prints the requests, their cost and any problem, and costs nothing.
 
 ## 3. The request ledger
 
-[sources/cds/engine.py](../src/edh_downloader/sources/cds/engine.py) keeps a **ledger**, `requests.json` in the
+[sources/cds/engine.py](../src/skysqueezer/sources/cds/engine.py) keeps a **ledger**, `requests.json` in the
 job folder, with every planned request and what happened to it. Each change is saved **before** the step it
 leads to.
 
@@ -138,7 +138,7 @@ back up by one after three successes, never above the job's setting](diagrams/cd
 
 ## 5. Downloads
 
-[sources/cds/client.py](../src/edh_downloader/sources/cds/client.py)
+[sources/cds/client.py](../src/skysqueezer/sources/cds/client.py)
 
 - Results are downloaded as soon as they are ready, 2 at a time.
 - An interrupted download continues with an HTTP `Range` request from the `.part` file.
@@ -153,10 +153,10 @@ back up by one after three successes, never above the job's setting](diagrams/cd
 ## 6. Processing
 
 The output layout comes from the files themselves, so it is built once the first result is known and saved as
-`output.json` and `grid.npz` in the job folder ([output.py](../src/edh_downloader/sources/cds/output.py)). A
+`output.json` and `grid.npz` in the job folder ([output.py](../src/skysqueezer/sources/cds/output.py)). A
 resumed job writes into the same layout even after those files were deleted.
 
-**GRIB** ([grib.py](../src/edh_downloader/sources/cds/grib.py)). A result holds one message per field (variable ×
+**GRIB** ([grib.py](../src/skysqueezer/sources/cds/grib.py)). A result holds one message per field (variable ×
 level × time step). The file is indexed from message headers only (fast, nothing decoded), then read message by
 message, one variable and level at a time, so a file of several GB never has to fit in memory. A slab of time
 steps uses at most a sixth of `memory_gb`. GRIB parameters are matched to the form's variable names by their
@@ -167,7 +167,7 @@ jobs work without it.
 timeline is known from the plan alone, before any download, and a unit can start as soon as its requests are
 downloaded. A file is deleted when the last unit that needs it is committed.
 
-**NetCDF** ([netcdf.py](../src/edh_downloader/sources/cds/netcdf.py)). The time axis, the levels and the variable
+**NetCDF** ([netcdf.py](../src/skysqueezer/sources/cds/netcdf.py)). The time axis, the levels and the variable
 names are only known from the files, so a NetCDF job downloads everything first, then converts:
 
 1. *unpack:* a result may be a NetCDF file, or a zip or tar of them (recognised by their first bytes: names lie).

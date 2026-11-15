@@ -19,4 +19,4 @@ secrets.*
 credentials*
 servers.json
 keys.json
-src/edh_downloader/_version.py
+src/skysqueezer/_version.py

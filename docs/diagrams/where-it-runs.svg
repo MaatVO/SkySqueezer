@@ -10,7 +10,7 @@
 <text x="235.0" y="172.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">one tab per connection</text>
 <path d="M235 186 L235 212" fill="none" stroke="#44546A" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#a-ink)"/>
 <rect x="60" y="214" width="350" height="80" rx="12" fill="#E8F0FF" stroke="#3B7BF0" stroke-width="2"/>
-<text x="235.0" y="241.0" font-size="15" font-weight="650" fill="#1F2A37" text-anchor="middle">edh-dl app (NiceGUI)</text>
+<text x="235.0" y="241.0" font-size="15" font-weight="650" fill="#1F2A37" text-anchor="middle">sks-dl app (NiceGUI)</text>
 <text x="235.0" y="262.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">gui/connect.py: servers and tabs</text>
 <text x="235.0" y="280.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">gui/app.py: the job form, keys, jobs</text>
 <path d="M235 294 L235 320" fill="none" stroke="#44546A" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#a-ink)"/>
@@ -23,7 +23,7 @@
 <rect x="520" y="84" width="410" height="410" rx="16" fill="#F1E8FF" fill-opacity="0.45" stroke="#7B34DB" stroke-width="2" stroke-dasharray="8 6"/>
 <text x="536" y="108" font-size="13.5" font-weight="700" fill="#7B34DB" text-anchor="start">Server (or this computer)</text>
 <rect x="550" y="124" width="350" height="80" rx="12" fill="#F1E8FF" stroke="#7B34DB" stroke-width="2"/>
-<text x="725.0" y="151.0" font-size="15" font-weight="650" fill="#1F2A37" text-anchor="middle">edh-dl agent</text>
+<text x="725.0" y="151.0" font-size="15" font-weight="650" fill="#1F2A37" text-anchor="middle">sks-dl agent</text>
 <text x="725.0" y="172.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">JSON lines on stdin / stdout</text>
 <text x="725.0" y="190.0" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="middle">one thread per request</text>
 <path d="M725 204 L725 230" fill="none" stroke="#7B34DB" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#a-proc)"/>

@@ -30,7 +30,7 @@ def _key(name, provider: str = sources.EDH):
 
 
 def hello() -> dict:
-    return {"version": __version__, "default_dir": str(Path("~/edh-data").expanduser()),
+    return {"version": __version__, "default_dir": str(Path("~/sks-data").expanduser()),
             "platform": f"{platform.system()} {platform.machine()}", "python": platform.python_version()}
 
 

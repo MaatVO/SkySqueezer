@@ -4,7 +4,7 @@ import numpy as np
 
 
 def test_short_maps_only_real_level_dims():
-    from edh_downloader.gui.structure import _short
+    from skysqueezer.gui.structure import _short
 
     assert _short("valid_time") == "time"
     assert _short("latitude") == "lat" and _short("longitude") == "lon"
@@ -24,7 +24,7 @@ def _store(dims="d", dtype="i4", name="v"):
 
 
 def test_tree_html_escapes_dims_and_dtype():
-    from edh_downloader.gui.structure import tree_html
+    from skysqueezer.gui.structure import tree_html
 
     html = tree_html(_store(dims="<img src=x>", dtype="<script>"))
     assert "<img src=x>" not in html and "<script>" not in html
@@ -32,7 +32,7 @@ def test_tree_html_escapes_dims_and_dtype():
 
 
 def test_tree_html_plain_store_still_renders():
-    from edh_downloader.gui.structure import tree_html
+    from skysqueezer.gui.structure import tree_html
 
     html = tree_html(_store())
     assert 'class="edh-tree"' in html and "v" in html
@@ -40,7 +40,7 @@ def test_tree_html_plain_store_still_renders():
 
 def test_coord_detail_empty_and_nan_coordinates():
     xr = __import__("xarray")
-    from edh_downloader.gui.structure import _coord_detail
+    from skysqueezer.gui.structure import _coord_detail
 
     assert _coord_detail(xr.Dataset({"empty": ("x", np.array([], dtype="float64"))}), "empty") == ""
     assert _coord_detail(xr.Dataset({"nan2d": (("y", "x"), np.full((2, 2), np.nan))}), "nan2d") == ""

@@ -1,7 +1,7 @@
 [project]
-name = "edh-downloader"
+name = "skysqueezer"
 version = "1.0.0"
-description = "Weather Dataset Downloader: download weather and climate dataset subsets from Earth Data Hub and the Copernicus Climate Data Store to Icechunk/Zarr, with a web UI and detached jobs"
+description = "SkySqueezer: download weather and climate dataset subsets from Earth Data Hub and the Copernicus Climate Data Store to Icechunk/Zarr, with a web UI and detached jobs"
 readme = "README.md"
 authors = [
     { name = "Mattia Varagnolo" }
@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.scripts]
-edh-dl = "edh_downloader.cli:main"
+sks-dl = "skysqueezer.cli:main"
 
 [build-system]
 requires = ["hatchling"]

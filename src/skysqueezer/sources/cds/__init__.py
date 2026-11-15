@@ -6,12 +6,14 @@ profile checks a token without queueing anything and without any cost.
 
 import os
 
+from ...paths import env
+
 API = "https://cds.climate.copernicus.eu/api"
 
 
 def api() -> str:
-    """The CDS API base URL (``EDH_DL_CDS_API`` points the app at another one, e.g. the test server)."""
-    return (os.environ.get("EDH_DL_CDS_API") or API).rstrip("/")
+    """The CDS API base URL (``SKS_DL_CDS_API`` points the app at another one, e.g. the test server)."""
+    return (env("CDS_API") or API).rstrip("/")
 
 
 async def validate(secret: str, base: str | None = None) -> tuple[bool, str]:

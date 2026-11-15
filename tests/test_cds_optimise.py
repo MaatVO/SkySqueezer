@@ -14,15 +14,15 @@ from test_cds_engine import fast, ledger, spec  # noqa: F401  (fixture)
 from test_cds_plan import BOX, ERA, SURFACE, plan
 from test_cds_plan import spec as pspec
 
-from edh_downloader.aggregate import reduce_periods
-from edh_downloader.job import AreaSpec
-from edh_downloader.planner import PlanError
-from edh_downloader.runner import create_job, run_foreground, status
-from edh_downloader.sources.cds import catalog, grib
-from edh_downloader.sources.cds.engine import Running, period_groups
-from edh_downloader.sources.cds.grib import Grid, Message
-from edh_downloader.sources.cds.output import CdsOutput
-from edh_downloader.sources.cds.planner import CdsPlan, default_limit, fit_costs
+from skysqueezer.aggregate import reduce_periods
+from skysqueezer.job import AreaSpec
+from skysqueezer.planner import PlanError
+from skysqueezer.runner import create_job, run_foreground, status
+from skysqueezer.sources.cds import catalog, grib
+from skysqueezer.sources.cds.engine import Running, period_groups
+from skysqueezer.sources.cds.grib import Grid, Message
+from skysqueezer.sources.cds.output import CdsOutput
+from skysqueezer.sources.cds.planner import CdsPlan, default_limit, fit_costs
 
 GLOBAL = AreaSpec(mode="global")
 
@@ -187,7 +187,7 @@ def test_whole_domain_box_cut_in_longitude(cds, west, east, n, first):
 
 
 def test_projected_grids_are_sharded_in_space():
-    from edh_downloader import chunking
+    from skysqueezer import chunking
 
     class P:
         def out_dims(self, vp):

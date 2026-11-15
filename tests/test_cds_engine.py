@@ -9,11 +9,11 @@ import pytest
 import xarray as xr
 from fake_cds import TOKEN, value
 
-from edh_downloader import runner, service
-from edh_downloader.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, Point, TimeSpec
-from edh_downloader.runner import create_job, run_foreground
-from edh_downloader.sources.cds import engine as cds_engine
-from edh_downloader.sources.cds.client import CDSClient
+from skysqueezer import runner, service
+from skysqueezer.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, Point, TimeSpec
+from skysqueezer.runner import create_job, run_foreground
+from skysqueezer.sources.cds import engine as cds_engine
+from skysqueezer.sources.cds.client import CDSClient
 
 ERA = "reanalysis-era5-single-levels"
 BOX = AreaSpec(mode="bbox", west=10, south=45, east=12, north=47)
@@ -127,7 +127,7 @@ def test_submission_cut_short_is_found_again(home, fast):
     job = create_job(s)
     # a first run that died right after submitting: the ledger says "submitting", the CDS has the job
     eng = cds_engine.CdsEngine(job)
-    eng.key = __import__("edh_downloader").keys.get_key("cds-test", "cds")
+    eng.key = __import__("skysqueezer").keys.get_key("cds-test", "cds")
     eng.desc = cds_engine.catalog.describe(ERA)
     eng.files_only = False
     eng.ledger = cds_engine.Ledger(job / "requests.json")

@@ -11,8 +11,8 @@ import pytest
 import xarray as xr
 from aiohttp import web
 
-from edh_downloader import runner
-from edh_downloader.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, TimeSpec
+from skysqueezer import runner
+from skysqueezer.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, TimeSpec
 
 
 class Faulty:
@@ -173,7 +173,7 @@ def test_sigkill_then_resume(home, faulty, fake_edh):
 
 
 def test_extend_failure_before_first_unit_then_resume_does_not_extend_twice(home, fake_edh, monkeypatch):
-    from edh_downloader import engine, store
+    from skysqueezer import engine, store
 
     base = _spec(fake_edh, home, "ext", time=TimeSpec("2019-11-15", "2019-11-19", "none"),
                  area=AreaSpec("bbox", west=-30, east=30, south=-20, north=20))
@@ -219,7 +219,7 @@ def base_store(home, fake_edh):
     ("gap in dates", {}, ("2019-11-25", "2019-11-28")),
 ])
 def test_extend_with_incompatible_job_is_refused_not_silently_corrupting(home, fake_edh, base_store, what, kw, t):
-    from edh_downloader import store
+    from skysqueezer import store
 
     n0 = store.inspect_icechunk_for_extend(base_store.icechunk_path)["time_len"]
     job = runner.create_job(_extend_spec(fake_edh, home, base_store, *t, **kw))

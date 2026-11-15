@@ -12,7 +12,7 @@ catalog.py  ->  planner.py  ->  engine.py (+ http.py, codecs.py)  ->  aggregate.
 
 ## 1. Catalogue
 
-[catalog.py](../src/edh_downloader/catalog.py)
+[catalog.py](../src/skysqueezer/catalog.py)
 
 - **Datasets** come from the public STAC API: collections, then their items. Catalogue images are public too and
   cost no quota.
@@ -20,7 +20,7 @@ catalog.py  ->  planner.py  ->  engine.py (+ http.py, codecs.py)  ->  aggregate.
   `zarr.json`.
 - **Coordinates** (time, latitude, longitude, levels) are fetched once and cached locally.
 
-The structure and the coordinates cost a few requests per dataset per day of cache. `EDH_DL_OFFLINE=1` uses the
+The structure and the coordinates cost a few requests per dataset per day of cache. `SKS_DL_OFFLINE=1` uses the
 cache even when it is old and never fetches.
 
 Each variable knows its default statistic: accumulated fields (precipitation, radiation and similar) are summed
@@ -28,7 +28,7 @@ over a period, the others averaged.
 
 ## 2. Plan
 
-[planner.py](../src/edh_downloader/planner.py) turns a `JobSpec` and a dataset into an exact plan.
+[planner.py](../src/skysqueezer/planner.py) turns a `JobSpec` and a dataset into an exact plan.
 
 **Variables and levels.** The selected variables, and for pressure-level products the selected levels. A level
 chunk holds one level, so each level is its own set of chunks.
@@ -62,7 +62,7 @@ the exact number of requests the job will make (plus a few for metadata).
 
 ## 3. Engine
 
-[engine.py](../src/edh_downloader/engine.py) runs the plan in a detached worker.
+[engine.py](../src/skysqueezer/engine.py) runs the plan in a detached worker.
 
 ![The asyncio side (producer, work queue, workers, monitor) fills a spool of chunk files from Earth Data Hub; the
 processor thread waits for a unit, decodes, cuts and aggregates it, commits it and frees the spool](diagrams/edh-engine.svg)
@@ -88,12 +88,12 @@ processor thread waits for a unit, decodes, cuts and aggregates it, commits it a
 
 When every unit is committed, the job sets the final attributes and exports to Zarr (see [Storage](storage.md)).
 
-**HTTP.** [http.py](../src/edh_downloader/http.py) sends the key as a bearer token, follows the proxy
+**HTTP.** [http.py](../src/skysqueezer/http.py) sends the key as a bearer token, follows the proxy
 environment variables, and retries network errors, HTTP 429 and 5xx up to 6 times with exponential backoff and
 jitter (at most 5 minutes between tries). 401 (bad key), 403 (access denied or server-side quota used up) and
 404 on metadata stop the job: retrying cannot fix them.
 
-**Chunk decoding.** [codecs.py](../src/edh_downloader/codecs.py) decodes raw Zarr v3 chunks by following the
+**Chunk decoding.** [codecs.py](../src/skysqueezer/codecs.py) decodes raw Zarr v3 chunks by following the
 array's own codec chain, so no Zarr store object is opened over HTTP.
 
 ## Quota
@@ -105,7 +105,7 @@ Every request is reserved before it is sent. When this month's count for the key
 
 ## Sampling
 
-[sample.py](../src/edh_downloader/sample.py) is optional and costs real requests (12 by default, confirmed
+[sample.py](../src/skysqueezer/sample.py) is optional and costs real requests (12 by default, confirmed
 first). It downloads chunks the job itself will need, spread over the variables and the period:
 
 - the first 2 one at a time, then in parallel (up to 32 connections), to measure single-connection speed,

@@ -5,10 +5,10 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from edh_downloader import catalog, keys
-from edh_downloader.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, Point, TimeSpec
-from edh_downloader.planner import Plan
-from edh_downloader.runner import create_job, run_foreground
+from skysqueezer import catalog, keys
+from skysqueezer.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, Point, TimeSpec
+from skysqueezer.planner import Plan
+from skysqueezer.runner import create_job, run_foreground
 
 REDUCE = {"mean": np.nanmean, "min": np.nanmin, "max": np.nanmax, "sum": np.nansum, "first": lambda a, axis: a[0]}
 
