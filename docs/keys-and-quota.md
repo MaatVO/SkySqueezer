@@ -2,15 +2,15 @@
 
 ## Where keys come from
 
-[keys.py](../src/edh_downloader/keys.py) keeps the API keys of every source. Each key belongs to one source, and
+[keys.py](../src/skysqueezer/keys.py) keeps the API keys of every source. Each key belongs to one source, and
 each source has its own default key.
 
 | Source | Stored keys | Found automatically |
 |---|---|---|
-| Earth Data Hub | `~/.config/edh-dl/keys.json` | `~/.netrc`, entry `machine data.earthdatahub.destine.eu` (the password is the key) |
-| Climate Data Store | `~/.config/edh-dl/keys.json` | `~/.cdsapirc` (or `$CDSAPI_RC`), or the `CDSAPI_URL` / `CDSAPI_KEY` variables: what the `cdsapi` package uses |
+| Earth Data Hub | `~/.config/sks-dl/keys.json` | `~/.netrc`, entry `machine data.earthdatahub.destine.eu` (the password is the key) |
+| Climate Data Store | `~/.config/sks-dl/keys.json` | `~/.cdsapirc` (or `$CDSAPI_RC`), or the `CDSAPI_URL` / `CDSAPI_KEY` variables: what the `cdsapi` package uses |
 
-Keys are added in the **Keys** tab or with `edh-dl keys add NAME [--source cds]`. `keys.json` is written with
+Keys are added in the **Keys** tab or with `sks-dl keys add NAME [--source cds]`. `keys.json` is written with
 permissions 0600. A damaged `keys.json` is set aside as `keys.json.bad` instead of stopping the app.
 
 A `keys.json` written before the app had sources has no source on its keys: they are Earth Data Hub keys, and its
@@ -33,18 +33,18 @@ A `keys.json` written before the app had sources has no source on its keys: they
 
 ## Earth Data Hub quota
 
-Earth Data Hub gives each key a monthly allowance (500,000 requests by default; `edh-dl keys quota NAME N` sets
+Earth Data Hub gives each key a monthly allowance (500,000 requests by default; `sks-dl keys quota NAME N` sets
 another) and does not tell API-key clients how much is left. So the app counts its own requests
-([quota.py](../src/edh_downloader/quota.py)).
+([quota.py](../src/skysqueezer/quota.py)).
 
-- **Where:** `~/.local/share/edh-dl/usage.json`, per key fingerprint and calendar month (UTC). The file is locked
+- **Where:** `~/.local/share/sks-dl/usage.json`, per key fingerprint and calendar month (UTC). The file is locked
   while it is updated, so every job on the machine shares the same count.
 - **How:** each request is reserved before it is sent. Jobs flush their counts to the file in batches of 50 and
   read back what other jobs added.
 - **Limit:** a job stops at `quota × quota_safety` (90% by default). With `wait_for_quota` it waits for the reset
   (`waiting_quota`) and continues; without it, it stops as `paused_quota`.
 - **Calibrate:** requests made by other tools are not counted. Enter the "used" number shown on the
-  [Earth Data Hub quota page](https://earthdatahub.destine.eu/) (Keys tab, or `edh-dl keys calibrate`) and the
+  [Earth Data Hub quota page](https://earthdatahub.destine.eu/) (Keys tab, or `sks-dl keys calibrate`) and the
   app adds the difference as an offset for the rest of the month.
 
 What costs requests:

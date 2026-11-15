@@ -27,4 +27,4 @@ class TokenMiddleware(BaseHTTPMiddleware):
         c = request.cookies.get(name, "")
         if c and secrets.compare_digest(c, self.token):
             return await call_next(request)
-        return PlainTextResponse("Open the link with the access token printed by `edh-dl serve`.", status_code=401)
+        return PlainTextResponse("Open the link with the access token printed by `sks-dl serve`.", status_code=401)

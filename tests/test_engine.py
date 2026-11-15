@@ -2,9 +2,9 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from edh_downloader import quota, keys
-from edh_downloader.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, Point, TimeSpec
-from edh_downloader.runner import create_job, run_foreground
+from skysqueezer import quota, keys
+from skysqueezer.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, Point, TimeSpec
+from skysqueezer.runner import create_job, run_foreground
 
 
 def spec(fake, out, **kw):
@@ -89,9 +89,9 @@ def test_sample_estimate(home, fake_edh):
     """A small sample of the job's own chunks gives measured download and Zarr sizes and a suggestion."""
     import asyncio
 
-    from edh_downloader import catalog, chunking, quota, sample
-    from edh_downloader.http import RequestCounter
-    from edh_downloader.planner import Plan
+    from skysqueezer import catalog, chunking, quota, sample
+    from skysqueezer.http import RequestCounter
+    from skysqueezer.planner import Plan
 
     key = keys.get_key("test")
     ds = catalog.load_dataset(fake_edh.url, key.secret)
@@ -113,8 +113,8 @@ def test_sample_estimate(home, fake_edh):
 
 
 def test_chunk_layouts_and_lossless_default(home, fake_edh):
-    from edh_downloader import catalog
-    from edh_downloader.planner import Plan
+    from skysqueezer import catalog
+    from skysqueezer.planner import Plan
 
     assert OutputSpec().keepbits is None  # lossless by default
     ds = catalog.load_dataset(fake_edh.url, "test-key")
@@ -160,8 +160,8 @@ def test_rechunked_sharded_export(home, fake_edh):
 
 
 def test_recommendations(home, fake_edh):
-    from edh_downloader import catalog, chunking
-    from edh_downloader.planner import Plan
+    from skysqueezer import catalog, chunking
+    from skysqueezer.planner import Plan
 
     ds = catalog.load_dataset(fake_edh.url, "test-key")
     pts = AreaSpec("points", points=[Point("a", 1, 1)])
@@ -174,7 +174,7 @@ def test_recommendations(home, fake_edh):
 
 
 def test_extend_time_series_forward_and_backward(home, fake_edh):
-    from edh_downloader import store
+    from skysqueezer import store
 
     # 1. Base job: 2019-11-15 to 2019-11-19
     s1 = spec(fake_edh, home / "out", time=TimeSpec("2019-11-15", "2019-11-19", "none"),
@@ -235,7 +235,7 @@ def test_export_verified_and_corruption_detected(home, fake_edh):
     import pytest
     import zarr
 
-    from edh_downloader import store
+    from skysqueezer import store
 
     s = spec(fake_edh, home / "out", output=OutputSpec(directory=str(home / "out"), name="v", keepbits=None,
                                                        export_zarr=True, keep_icechunk=True))

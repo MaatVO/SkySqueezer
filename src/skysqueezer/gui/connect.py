@@ -17,10 +17,11 @@ import time
 
 import asyncssh
 from fastapi.responses import PlainTextResponse
-from nicegui import Client, app, ui
+from nicegui import Client, app, run, ui
 
 from .. import __version__, backend, remote, sshconfig, update
 from . import logo, tour
+from .messages import display_version
 from .theme import apply_theme
 
 # one user, one app: the open connections outlive page reloads
@@ -74,7 +75,7 @@ def build_connect_page():
         if STATE["local"]:
             tab("local", "laptop", "This computer", tip="the UI running on this computer")
         for sid, sess in sessions.items():
-            tab(sid, "dns", sess.server.name, tip=f"edh-dl v{sess.version} on {sess.server.name}")
+            tab(sid, "dns", sess.server.name, tip=f"sks-dl v{sess.version} on {sess.server.name}")
         tab("new", "add", "Connect" if not (sessions or STATE["local"]) else "", closable=False,
             tip="connect to a server, or use this computer")
 
@@ -166,7 +167,7 @@ def build_connect_page():
                 el.set_visibility(False)
             with form_pane.clear():
                 with ui.column().classes("w-full items-center gap-2 py-16"):
-                    ui.label("Weather Dataset Downloader is closed").classes("edh-title")
+                    ui.label("SkySqueezer is closed").classes("edh-title")
                     ui.label("You can close this tab. Download jobs keep running.").classes("edh-muted")
             form_pane.set_visibility(True)
             await asyncio.sleep(0.3)
@@ -174,7 +175,7 @@ def build_connect_page():
 
         n = len(sessions)
         conns = f"its {n} SSH connection{'s' if n != 1 else ''}" if n else "the app"
-        confirm("Quit Weather Dataset Downloader?", f"Closes {conns}. Download jobs keep running in the background (here and on "
+        confirm("Quit SkySqueezer?", f"Closes {conns}. Download jobs keep running in the background (here and on "
                 "the servers) and show up again in Jobs when you open the app.", "Quit", quit_)
 
     def watch():  # a connection that dropped (network, server reboot): close its tab and say so
@@ -183,10 +184,55 @@ def build_connect_page():
                 ui.notify(f"connection to {sess.server.name} closed; download jobs keep running there. "
                           "Connect again to see them.", type="warning", timeout=0, close_button=True)
                 asyncio.create_task(close(sid))
-        if update.UPDATED and not STATE.get("update_told"):  # downloaded in the background since the start
-            STATE["update_told"] = True
-            ui.notify(f"Weather Dataset Downloader {update.UPDATED} is downloaded. It starts next time you open the app; "
-                      "download jobs are not affected.", type="info", timeout=0, close_button=True)
+        if update.AVAILABLE and not STATE.get("update_asked"):  # found at start-up: ask once, in this window
+            STATE["update_asked"] = True
+            ask_update(update.AVAILABLE)
+
+    def ask_update(info):
+        """A newer release: nothing is downloaded until the user says yes."""
+        new = info["version"]
+        with dialogs, ui.dialog() as dlg, ui.card().classes("edh-card gap-3").style("width:min(480px,94vw)"):
+            ui.label(f"Update to SkySqueezer {new}?").classes("edh-title").props("role=heading aria-level=2")
+            ui.markdown(f"You have {display_version(__version__)}. The update comes from the project's GitHub "
+                        "releases and is checked against its checksum before it replaces this program. **It "
+                        "starts next time you open the app**; download jobs, here and on servers, keep running."
+                        ).classes("text-body2")
+            if info.get("page", "").startswith("https://"):
+                ui.link("What's new", info["page"], new_tab=True).classes("text-body2")
+            note = ui.label().classes("text-caption").props("role=status")
+            note.set_visibility(False)
+            with ui.row().classes("w-full items-center justify-between gap-2"):
+                skip = ui.button("Skip this version", on_click=lambda: (update.skip(new), dlg.close())).props(
+                    "flat no-caps color=grey-5")
+                with ui.row().classes("items-center gap-2"):
+                    later_ = ui.button("Not now", on_click=dlg.close).props("flat no-caps")
+                    yes = ui.button("Download update", icon="system_update_alt").props(
+                        "unelevated no-caps").classes("edh-primary-btn")
+
+            async def go():
+                for b in (skip, later_, yes):
+                    b.disable()
+                yes.props("loading")
+                note.classes(replace="text-caption edh-muted")
+                note.text = "Downloading and checking …"
+                note.set_visibility(True)
+                try:
+                    await run.io_bound(update.apply, info)
+                except Exception as e:  # offline, read-only folder, checksum …: this version keeps working
+                    yes.props(remove="loading")
+                    yes.text = "Try again"
+                    for b in (skip, later_, yes):
+                        b.enable()
+                    note.classes(replace="text-caption text-negative")
+                    note.text = f"The update failed: {e}. This version keeps working."
+                    return
+                dlg.close()
+                ui.notify(f"SkySqueezer {new} is installed. It starts next time you open the app.",
+                          type="positive", timeout=0, close_button=True)
+
+            yes.on_click(go)
+        dlg.on("hide", lambda: dlg.delete())
+        dlg.open()
 
     ui.timer(2.0, watch)
     select(STATE["active"])
@@ -260,7 +306,7 @@ def _connect_form(on_connected, open_local):
         with ui.row().classes("items-center gap-3 no-wrap"):
             ui.html(logo.img(), sanitize=False)
             with ui.column().classes("gap-0"):
-                ui.label("Weather Dataset Downloader").classes("edh-brand")
+                ui.label("SkySqueezer").classes("edh-brand")
                 ui.label(f"v{__version__} · connect to the server that downloads and stores your data").classes(
                     "edh-muted text-caption")
         with ui.row().classes("w-full gap-5 items-start no-wrap max-md:flex-wrap"):
@@ -392,7 +438,7 @@ def _connect_form(on_connected, open_local):
             dialog("Set up the server",
                    "The server needs a Python environment for the downloads (numpy, zarr, icechunk …, about "
                    "300 MB from PyPI, once). Only the app's code is sent afterwards (a few hundred KB, when it "
-                   "changes). It is created in `~/.local/share/edh-dl` and uses `uv` if the server has it.",
+                   "changes). It is created in `~/.local/share/sks-dl` and uses `uv` if the server has it.",
                    [("Set up and connect", lambda: later(lambda: connect(True)))])
             return
         except remote.SetupFailed as e:
@@ -423,7 +469,7 @@ def _warm_up(delay: float = 1.5):
     """While the connect page is on screen: import the app's interface and the download machinery (pandas, zarr,
     icechunk …, ~1 s), so the first server tab or This computer opens without that wait."""
     time.sleep(delay)  # the connect page first
-    for name in ("edh_downloader.gui.app", "edh_downloader.service"):
+    for name in ("skysqueezer.gui.app", "skysqueezer.service"):
         try:
             importlib.import_module(name)
         except Exception:  # noqa: BLE001 - the page that needs it imports it again and reports the problem
@@ -463,11 +509,11 @@ def serve_local(port: int = 0, open_browser: bool = True):
             await sess.close()
 
     app.on_shutdown(close)
-    app.on_startup(lambda: threading.Thread(target=_warm_up, name="edh-dl-warm-up", daemon=True).start())
+    app.on_startup(lambda: threading.Thread(target=_warm_up, name="sks-dl-warm-up", daemon=True).start())
     path = f"/?token={tok}"
-    print("Weather Dataset Downloader (connects to a server over SSH)")
+    print("SkySqueezer (connects to a server over SSH)")
     print(f"  http://localhost:{port}{path}")
     print("  Closing the browser tab (or Ctrl+C) quits; download jobs keep running.", flush=True)
-    ui.run(host="127.0.0.1", port=port, title="Weather Dataset Downloader", show=path if open_browser else False, reload=False,
+    ui.run(host="127.0.0.1", port=port, title="SkySqueezer", show=path if open_browser else False, reload=False,
            favicon=logo.PNG_DATA_URL, dark=True, show_welcome_message=False, storage_secret=secrets.token_hex(16),
            uvicorn_logging_level="warning")

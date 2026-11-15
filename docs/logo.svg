@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 1254 1254" role="img" aria-labelledby="logo-title logo-desc">
-<title id="logo-title">Weather Dataset Downloader</title>
+<title id="logo-title">SkySqueezer</title>
 <desc id="logo-desc">A man sitting on the Earth squeezes the sun; its juice falls as pixel drops into a glass jar that fills up as a heatmap grid.</desc>
 <defs><clipPath id="logo-tile"><rect width="1254" height="1254" rx="180"/></clipPath></defs>
 <g clip-path="url(#logo-tile)">

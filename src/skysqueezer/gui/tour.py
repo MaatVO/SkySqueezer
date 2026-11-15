@@ -41,6 +41,7 @@ def set_stage(s: str) -> None:
 # ------------------------------------------------------------------ steps
 # el: a selector, or a list: the first, else the first visible fallback; none = a centred card
 # click: clicked before the step is shown (a tab), then el is awaited a few seconds
+# open: a fold (New job step, job, key) opened after the click, so what el points at inside it is shown
 # optional: left out when its element is not on the page
 
 def connect_steps(apps_open: bool) -> list[dict]:
@@ -64,7 +65,7 @@ def connect_steps(apps_open: bool) -> list[dict]:
                  "and passphrases are never saved."},
         {"el": ".edh-tour-connect", "title": "Connect",
          "body": "The first time, you check the server's key fingerprint. If the server has no download "
-                 "environment yet, the app offers to set one up in <code>~/.local/share/edh-dl</code> (about "
+                 "environment yet, the app offers to set one up in <code>~/.local/share/sks-dl</code> (about "
                  "300 MB, once)."},
         {"el": ".edh-tour-servers", "title": "Saved servers",
          "body": "Servers you connect to are listed here: connect again in one click. Every open connection gets "
@@ -96,23 +97,23 @@ def app_steps(where: str, sample_requests: int, replay_hint: str) -> list[dict]:
          "body": "Earth Data Hub allows 500,000 requests a month, and every source chunk downloaded is one "
                  "request. The app counts only its own requests: calibrate it in Keys against the official quota "
                  "page."},
-        {"el": ".edh-tour-source", "click": NEW, "title": "Earth Data Hub or Climate Data Store",
+        {"el": ".edh-tour-source", "click": NEW, "open": ".edh-tour-dataset", "title": "Earth Data Hub or Climate Data Store",
          "body": "Choose where the data comes from. Earth Data Hub reads ERA5 chunks directly. The Climate Data "
                  "Store has every Copernicus dataset, but each request waits in a queue: the app packs your "
                  "selection into as few requests as the CDS allows."},
-        {"el": ".edh-tour-dataset", "click": NEW, "title": "1 · Dataset",
+        {"el": ".edh-tour-dataset", "click": NEW, "open": ".edh-tour-dataset", "title": "1 · Dataset",
          "body": "Pick a collection and a dataset. Its variables, levels, grid and time span load from Earth Data "
                  "Hub."},
-        {"el": ".edh-tour-variables", "click": NEW, "title": "2 · Variables and levels",
+        {"el": ".edh-tour-variables", "click": NEW, "open": ".edh-tour-variables", "title": "2 · Variables and levels",
          "body": "Tick the variables you need. On pressure-level datasets, choose the levels too: each one adds "
                  "requests."},
-        {"el": ".edh-tour-time", "click": NEW, "title": "3 · Time",
+        {"el": ".edh-tour-time", "click": NEW, "open": ".edh-tour-time", "title": "3 · Time",
          "body": "First and last day, and the hours. Keep every hour as stored, or aggregate into steps of N hours, "
                  "days, months or years, with statistics per variable (mean, min, max, sum)."},
-        {"el": ".edh-tour-area", "click": NEW, "title": "4 · Area",
+        {"el": ".edh-tour-area", "click": NEW, "open": ".edh-tour-area", "title": "4 · Area",
          "body": "The whole globe, a box (type it, use a preset or draw it on the map) or a list of points. Boxes "
                  "may cross the 180° meridian."},
-        {"el": ".edh-tour-output", "click": NEW, "title": "5 · Output",
+        {"el": ".edh-tour-output", "click": NEW, "open": ".edh-tour-output", "title": "5 · Output",
          "body": "Where the data goes and in which format: Icechunk, Zarr v3, or both. You can also extend an "
                  "existing Icechunk store in time. For Zarr, compare chunk layouts and choose the compression."},
         {"el": ".edh-tour-summary", "click": NEW, "title": "Know the cost first",
@@ -127,7 +128,7 @@ def app_steps(where: str, sample_requests: int, replay_hint: str) -> list[dict]:
                  "limit (90% by default)."},
         {"el": ".edh-tour-launch", "click": NEW, "title": "Launch",
          "body": "Starts the job in the background. Close the browser or disconnect: it keeps running. "
-                 "<b>Download job.json</b> saves the setup for <code>edh-dl run</code> on the command line."},
+                 "<b>Download job.json</b> saves the setup for <code>sks-dl run</code> on the command line."},
         {"el": ".edh-tour-jobs", "click": ".edh-tour-tab-jobs", "title": "Follow your jobs",
          "body": "Progress and time left for every job. Pause, resume or cancel, change connections, read the log, "
                  "or clone the setup. An interrupted job resumes from its last committed unit, without downloading "
@@ -148,11 +149,11 @@ ROUTE = (("Connect", "to your server over SSH, or use this computer"),
 
 def welcome(on_start: Callable[[], None], on_skip: Callable[[], None], connect: bool, replay: str):
     """The first-launch offer: start the tour, or skip it (``replay`` says where it stays available).
-    ``connect``: the tour starts on the connect page; otherwise (edh-dl serve) it skips that part."""
+    ``connect``: the tour starts on the connect page; otherwise (sks-dl serve) it skips that part."""
     route = ROUTE if connect else ROUTE[1:]
     with ui.dialog().props("persistent") as dlg, ui.card().classes("edh-card gap-4").style(
             "width:min(520px,94vw)").props('role=dialog aria-labelledby=edh-welcome-title'):
-        ui.label("Welcome to Weather Dataset Downloader").classes("edh-title").props("id=edh-welcome-title")
+        ui.label("Welcome to SkySqueezer").classes("edh-title").props("id=edh-welcome-title")
         ui.label("A short tour walks you through a whole download, one step at a time. About two minutes."
                  ).classes("text-body2")
         with ui.element("ol").classes("edh-tour-route"):
@@ -269,9 +270,17 @@ window.edhTour = (() => {
     i = n; dir = d;
     const s = steps[i];
     if (s.click) { const c = document.querySelector(s.click); if (c) c.click(); }
+    if (s.open) {  // a closed fold: click its header (a header of an open step does nothing)
+      const fo = document.querySelector(s.open);
+      if (fo && !fo.classList.contains('edh-fold-open')) {
+        fo.querySelector('.edh-fold-head')?.click();
+        await wait(250);  // the server opens it: scroll to its final size, not the folded one
+        if (my !== seq) return;
+      }
+    }
     const sels = [].concat(s.el || []);
     let el = find(sels[0]);
-    if (sels.length && !el && s.click) {  // after a tab switch the content may still be loading from the server
+    if (sels.length && !el && (s.click || s.open)) {  // after a tab switch the content may still be loading from the server
       for (let t = 0; t < 60 && !(el = find(sels[0])); t++) { await wait(50); if (my !== seq) return; }
     }
     if (!el) el = find(sels.slice(1));  // fallbacks, when the preferred element never came

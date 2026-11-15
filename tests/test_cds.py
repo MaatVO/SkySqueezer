@@ -6,9 +6,9 @@ import json
 import pytest
 from fake_cds import TOKEN, _canon
 
-from edh_downloader import keys
-from edh_downloader.sources.cds import catalog
-from edh_downloader.sources.cds.client import (AuthError, CDSClient, JobFailed, NoSuchJob, ResultsExpired,
+from skysqueezer import keys
+from skysqueezer.sources.cds import catalog
+from skysqueezer.sources.cds.client import (AuthError, CDSClient, JobFailed, NoSuchJob, ResultsExpired,
                                                Throttled, canonical, request_hash)
 
 ERA = "reanalysis-era5-single-levels"
@@ -229,8 +229,8 @@ def test_catalogue_is_cached(cds, monkeypatch):
     catalog.constraints(ERA)
     catalog.constraints(ERA)
     assert len(cds.calls) == n + 1  # only the first constraints read
-    monkeypatch.setenv("EDH_DL_OFFLINE", "1")
-    monkeypatch.setenv("EDH_DL_CDS_API", "http://127.0.0.1:9")  # nothing there
+    monkeypatch.setenv("SKS_DL_OFFLINE", "1")
+    monkeypatch.setenv("SKS_DL_CDS_API", "http://127.0.0.1:9")  # nothing there
     assert catalog.describe(ERA)["tier"] == "grib"
 
 
@@ -287,7 +287,7 @@ def test_local_constraints(cds):
 # ------------------------------------------------------------------ service (what the UI calls)
 
 def test_service_browses_the_cds_catalogue(cds):
-    from edh_downloader import service
+    from skysqueezer import service
 
     cats = service.collections(source="cds")
     assert cats[0]["id"] == "Reanalysis"
@@ -297,7 +297,7 @@ def test_service_browses_the_cds_catalogue(cds):
 
 
 def test_service_describes_with_missing_licences(cds):
-    from edh_downloader import service
+    from skysqueezer import service
 
     d = service.cds_describe(ERA, key="cds-test")
     assert d["licences_missing"] == []
@@ -307,7 +307,7 @@ def test_service_describes_with_missing_licences(cds):
 
 
 def test_service_checks_requests_locally(cds):
-    from edh_downloader import service
+    from skysqueezer import service
 
     n = len(cds.calls)
     r = service.cds_check(ERA, dict(REQ, variable=["nope"]))

@@ -1,7 +1,7 @@
 """Job specification: everything the user chose, serialisable to ``job.json``.
 
 The GUI only builds this; the engine only reads it. A job file can be created on one machine and run on
-another (``edh-dl run job.json``). It never contains the API key itself, only the key's name.
+another (``sks-dl run job.json``). It never contains the API key itself, only the key's name.
 """
 
 import shutil
@@ -66,7 +66,7 @@ class AreaSpec:
 
 @dataclass
 class OutputSpec:
-    directory: str = "~/edh-data"
+    directory: str = "~/sks-data"
     name: str = "era5_subset"
     export_zarr: bool = True  # also write a plain Zarr v3 store when finished
     keep_icechunk: bool = True  # keep the Icechunk repository after exporting

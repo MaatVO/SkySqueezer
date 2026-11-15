@@ -10,10 +10,10 @@ import random
 import pytest
 from aiohttp import web
 
-from edh_downloader import keys
-from edh_downloader.sources import cds
-from edh_downloader.sources.cds import catalog
-from edh_downloader.sources.cds.client import MAX_REDIRECTS, CDSClient, CDSError, expected_md5, same_origin
+from skysqueezer import keys
+from skysqueezer.sources import cds
+from skysqueezer.sources.cds import catalog
+from skysqueezer.sources.cds.client import MAX_REDIRECTS, CDSClient, CDSError, expected_md5, same_origin
 
 TOKEN = "hardening-token"
 BODY = bytes(range(256)) * 40  # 10240 bytes of result "file"
@@ -258,7 +258,7 @@ def _multipart(body: bytes, part: int) -> str:
 def test_download_accepts_the_multipart_etag_cds_publishes(tmp_path):
     """A large CDS result's ``file:checksum`` is the object store's multipart ETag without its ``-<parts>``
     suffix (a 1.5 GB ERA5 file: 30 parts of 50 MiB), not the file's MD5."""
-    from edh_downloader.sources.cds.client import MIB, checksum_matches
+    from skysqueezer.sources.cds.client import MIB, checksum_matches
 
     body = (bytes(range(256)) * 4096 * 4)[: 3 * MIB + 12345]  # 4 parts of 1 MiB
     want = _multipart(body, MIB)

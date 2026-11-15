@@ -20,7 +20,7 @@ import pandas as pd
 
 from .codecs import ChunkDecoder
 from .http import EDHClient
-from .paths import cache_dir
+from .paths import cache_dir, env
 from .util import read_json, write_json_atomic
 
 log = logging.getLogger("edh.catalog")
@@ -285,7 +285,7 @@ def load_dataset(url: str, secret: str, counter=None, refresh: bool = False, inf
     path = cache_dir() / f"meta_{_url_hash(url)}.json"
     d = read_json(path)
     if d is None or refresh or time.time() - d["t"] > META_TTL:
-        if os.environ.get("EDH_DL_OFFLINE"):
+        if env("OFFLINE"):
             if d is not None:
                 return Dataset(url, d["v"]["zarr_json"], d["v"]["coords"], info)
             raise RuntimeError(f"offline mode: {url} is not cached")

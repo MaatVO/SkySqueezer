@@ -1,5 +1,5 @@
 ---
-name: Weather Dataset Downloader
+name: SkySqueezer
 description: A flat, dark instrument panel for planning and watching large weather dataset downloads from Earth Data Hub and the Climate Data Store.
 colors:
   signal-blue: "#4c8dff"
@@ -125,13 +125,13 @@ components:
     rounded: "{rounded.field}"
 ---
 
-# Design System: Weather Dataset Downloader
+# Design System: SkySqueezer
 
 ## Overview
 
 **Creative North Star: "The Instrument Panel"**
 
-Weather Dataset Downloader looks like a quiet dark panel of labelled controls and readouts. Nothing on it is decoration: every element either sets a value or reports one. A researcher configures one consequential job here and later glances back to see how it is doing, so the surface stays calm, exact and unshowy, and trust comes from precision and legibility rather than from visual effect.
+SkySqueezer looks like a quiet dark panel of labelled controls and readouts. Nothing on it is decoration: every element either sets a value or reports one. A researcher configures one consequential job here and later glances back to see how it is doing, so the surface stays calm, exact and unshowy, and trust comes from precision and legibility rather than from visual effect.
 
 The panel is built from three tonal steps of slate, one lit colour and solid fills. Signal Blue marks where action or selection is. Green, amber and red appear only when they are reporting a state. Numbers are the most prominent content on screen wherever a decision or a check-in depends on them.
 
@@ -204,9 +204,9 @@ Implementation note: NiceGUI loads Quasar's `!important` rules in a CSS layer, a
 
 ## Layout
 
-The New job screen is a numbered setup sequence beside a sticky Summary card (26rem wide) that holds the cost and the launch action. At 1440px, steps 1 and 2 stack in one column, steps 3 and 4 in a second, and step 5 spans both beneath them. Below 1024px the Summary drops to full width.
+The New job screen is one column of five numbered steps beside a sticky Summary card (26rem wide) that holds the cost and the launch action. One step is open at a time; the others are folded to a single row that says what is set (see Folds). Continue at the bottom of a step opens the next one. Below 1024px the Summary drops to full width.
 
-The header is a fixed three-zone bar (72px rendered): product name on the left, tabs in the centre, quota status and key selector on the right. Page content is padded 24px. Keys is centred at a maximum of 1024px and the connection page at 1100px; Jobs is a one-line count of jobs by state above a full-width stack of job cards, ordered with jobs needing attention first.
+The header is a fixed three-zone bar (72px rendered): product name on the left, tabs in the centre, quota status and key selector on the right. Page content is padded 24px. Keys is centred at a maximum of 1024px and the connection page at 1100px; Jobs is a one-line count of jobs by state above a full-width stack of job folds, ordered with jobs needing attention first; running, failed and quota-held jobs start open. Keys lists each source's keys as folds, with Add a key as the last fold.
 
 Spacing follows a 4px step (4, 8, 12, 16, 20, 24), with 12px the most common gap. Panels sit 20px apart. Cards pad 20px vertically and 24px horizontally.
 
@@ -240,6 +240,13 @@ Solid and matter-of-fact: plain fills, small radii, no flourish. Controls look l
 - **Flat:** Text only, for presets and light actions (Europe, Today). Cancel uses Fault Red.
 - **Destructive confirm:** Solid Fault Red with dark text. The dialog names the job, and both buttons name their action (Keep running, Cancel job).
 - **Icon:** Flat and round, with a tooltip.
+
+### Folds
+- **Use:** The one row pattern on all three tabs: New job steps, jobs, keys (`gui/fold.py`).
+- **Header:** A button inside a heading, Panel Slate with the hairline border, 16px 20px padding. Left to right: a 28px badge (4px radius), the title (with a muted tag such as `required` or `default`), one summary line, a status word, and an outline action (Edit, Details, Manage, Add) that hides on phones.
+- **Badge:** A step number in an outline; solid Signal Blue for the open step; a green check when done, an amber mark when it needs a look. Jobs show their status icon in its status colour, keys a key icon.
+- **Status:** Done (green), Defaults, Empty, Loading (Legend Grey), Check (amber); jobs use their status colour and add a percentage while running.
+- **Body:** Indented to the title (64px; 16px on phones). A New job step ends with a hairline and Continue.
 
 ### Segmented Toggle
 - **Style:** Inset Slate track at 6px; the selected segment fills with Signal Blue.

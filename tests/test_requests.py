@@ -2,11 +2,11 @@
 
 import asyncio
 
-from edh_downloader import catalog, keys, sample
-from edh_downloader.http import RequestCounter
-from edh_downloader.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, TimeSpec
-from edh_downloader.planner import Plan
-from edh_downloader.runner import create_job, run_foreground
+from skysqueezer import catalog, keys, sample
+from skysqueezer.http import RequestCounter
+from skysqueezer.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, TimeSpec
+from skysqueezer.planner import Plan
+from skysqueezer.runner import create_job, run_foreground
 
 
 def _spec(fake, home, name):
@@ -45,7 +45,7 @@ def test_resume_of_completed_job_and_metadata_cost_nothing(home, fake_edh):
 def test_crash_while_removing_icechunk_after_export_does_not_redownload(home, fake_edh, monkeypatch):
     import shutil
 
-    from edh_downloader import engine, runner
+    from skysqueezer import engine, runner
 
     s = _spec(fake_edh, home, "zonly")
     s.output.export_zarr, s.output.keep_icechunk = True, False
@@ -79,7 +79,7 @@ def test_only_the_needed_chunks_are_requested(home, fake_edh):
     import pandas as pd
 
     from conftest import CX, CY, TC
-    from edh_downloader.job import Point
+    from skysqueezer.job import Point
 
     key = keys.get_key("test")
     ds = catalog.load_dataset(fake_edh.url, key.secret)

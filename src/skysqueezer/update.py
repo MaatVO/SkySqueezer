@@ -1,13 +1,14 @@
 """Self-update of the packaged executable from the latest GitHub release.
 
-Every start of the app (``edh-dl`` / ``edh-dl app``) asks GitHub for the latest release, in the background while
-the app starts. If it is newer than this build, the matching executable is downloaded, checked against the
-release's ``.sha256`` file and swapped in place of the running one, which carries on; the new version runs from the
-next start. Anything that goes wrong (offline, no permission to write next to the executable, unknown platform,
-...) is reported in one line and nothing changes.
+Every start of the app (``sks-dl`` / ``sks-dl app``) asks GitHub for the latest release, in the background while
+the app starts. If it is newer than this build, the app asks the user first (``AVAILABLE``; the pop-up is in
+gui/connect.py): only on a yes is the matching executable downloaded, checked against the release's ``.sha256``
+file and swapped in place of the running one, which carries on; the new version runs from the next start. "Skip this
+version" is remembered. Anything that goes wrong (offline, no permission to write next to the executable, unknown
+platform, ...) is reported and nothing changes.
 
 Only the packaged executable updates itself; running from source / ``uv tool install`` never does.
-Opt out with ``--no-update`` or ``EDH_DL_NO_UPDATE=1``. ``edh-dl update`` does the same on demand.
+Opt out with ``--no-update`` or ``SKS_DL_NO_UPDATE=1``. ``sks-dl update`` does the same on demand.
 """
 
 import hashlib
@@ -23,8 +24,10 @@ import urllib.request
 from pathlib import Path
 
 from . import __version__
+from .paths import config_dir, env
+from .util import read_json, write_json_atomic
 
-REPO = "MaatVO/WeatherFetch"
+REPO = "MaatVO/SkySqueezer"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
 
 
@@ -47,7 +50,7 @@ def can_self_update() -> bool:
 
 
 def _get(url: str, timeout: float) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": "edh-downloader-updater",
+    req = urllib.request.Request(url, headers={"User-Agent": "skysqueezer-updater",
                                                "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
@@ -62,12 +65,13 @@ def latest(timeout: float = 4.0) -> dict | None:
     assets = {a["name"]: a["browser_download_url"] for a in rel.get("assets", [])}
     for name, url in assets.items():
         if f"-{tag}" in name and not name.endswith(".sha256") and f"{name}.sha256" in assets:
-            return {"version": rel["tag_name"].lstrip("v"), "url": url, "sha_url": assets[f"{name}.sha256"]}
+            return {"version": rel["tag_name"].lstrip("v"), "url": url, "sha_url": assets[f"{name}.sha256"],
+                    "page": rel.get("html_url") or ""}
     return None
 
 
-def is_newer(remote: str, local: str = __version__) -> bool:
-    r, l = parse(remote), parse(local)
+def is_newer(remote: str, local: str | None = None) -> bool:
+    r, l = parse(remote), parse(__version__ if local is None else local)  # read now: tests patch __version__
     return bool(r) and r > l
 
 
@@ -77,11 +81,11 @@ def install(info: dict, exe: Path, timeout: float = 120.0) -> None:
         if not u.startswith("https://"):
             raise ValueError(f"refusing non-https url {u}")
     want = _get(info["sha_url"], 15).decode().split()[0].lower()
-    fd, tmp_name = tempfile.mkstemp(prefix=".edh-dl-new-", dir=exe.parent)  # same folder: atomic rename
+    fd, tmp_name = tempfile.mkstemp(prefix=".sks-dl-new-", dir=exe.parent)  # same folder: atomic rename
     tmp = Path(tmp_name)
     try:
         h = hashlib.sha256()
-        req = urllib.request.Request(info["url"], headers={"User-Agent": "edh-downloader-updater"})
+        req = urllib.request.Request(info["url"], headers={"User-Agent": "skysqueezer-updater"})
         with os.fdopen(fd, "wb") as f, urllib.request.urlopen(req, timeout=timeout) as r:
             while chunk := r.read(1 << 20):
                 h.update(chunk)
@@ -114,9 +118,9 @@ def check_and_update(force_notice: bool = False) -> bool:
         return False
     if not info or not is_newer(info["version"]):
         if force_notice:
-            print(f"edh-dl {__version__} is up to date")
+            print(f"sks-dl {__version__} is up to date")
         return False
-    print(f"Updating edh-dl {__version__} → {info['version']} …", flush=True)
+    print(f"Updating sks-dl {__version__} → {info['version']} …", flush=True)
     try:
         install(info, Path(sys.executable))
     except Exception as e:
@@ -130,13 +134,38 @@ def is_local_build(version: str | None = None) -> bool:
     return (version or __version__).endswith("+local")
 
 
-UPDATED: str | None = None  # the version installed in the background, which runs from the next start
+AVAILABLE: dict | None = None  # a newer release found at start-up (``latest()``), waiting for the user's yes
+UPDATED: str | None = None  # the version installed after the user said yes, which runs from the next start
+
+
+def _skip_file() -> Path:
+    return config_dir() / "update.json"
+
+
+def skipped() -> str | None:
+    """The version the user chose to skip: not offered again (a later one is)."""
+    return read_json(_skip_file(), {}, kind=dict).get("skip")
+
+
+def skip(version: str) -> None:
+    global AVAILABLE
+    write_json_atomic(_skip_file(), {"skip": version})
+    AVAILABLE = None
+
+
+def apply(info: dict) -> None:
+    """The user said yes: download, verify and swap in ``info``'s executable (raises on any problem; this version
+    keeps running either way)."""
+    global AVAILABLE, UPDATED
+    install(info, Path(sys.executable))
+    AVAILABLE, UPDATED = None, info["version"]
 
 
 def _clean_leftovers(exe: Path) -> None:
     """Remove what an interrupted update or a replaced Windows executable left next to ``exe``."""
     old = exe.with_name(exe.name + ".old")
-    stale = [p for p in exe.parent.glob(".edh-dl-new-*") if time.time() - p.stat().st_mtime > 3600]
+    stale = [p for pat in (".sks-dl-new-*", ".edh-dl-new-*")  # and leftovers from before the rename
+             for p in exe.parent.glob(pat) if time.time() - p.stat().st_mtime > 3600]
     for p in [old, *stale]:
         try:
             p.unlink(missing_ok=True)
@@ -144,25 +173,25 @@ def _clean_leftovers(exe: Path) -> None:
             pass
 
 
-def _update_in_background() -> None:
-    global UPDATED
+def _check_in_background() -> None:
+    """Find a newer release; nothing is downloaded until the user says yes."""
+    global AVAILABLE
     try:
         info = latest(timeout=10)
-        if not info or not is_newer(info["version"]):
-            return
-        install(info, Path(sys.executable))
-    except Exception as e:  # offline, rate-limited, read-only folder …: this version just keeps running
+    except Exception as e:  # offline, rate-limited …: this version just keeps running
         print(f"(update check: {e})", flush=True)
         return
-    UPDATED = info["version"]
-    print(f"edh-dl {UPDATED} is downloaded: it starts next time you open the app.", flush=True)
+    if not info or not is_newer(info["version"]) or info["version"] == skipped():
+        return
+    AVAILABLE = info
+    print(f"SkySqueezer {info['version']} is available: the app asks before installing it.", flush=True)
 
 
 def auto_update() -> None:
-    """Called at startup: looks for a newer release in the background, so the start is never delayed. A newer
-    executable is downloaded, verified and swapped in place of this one (the running program is unaffected); it
-    runs from the next start. Local builds never update themselves here (``edh-dl update`` still can)."""
-    if os.environ.get("EDH_DL_NO_UPDATE") or not can_self_update() or is_local_build():
+    """Called at startup: looks for a newer release in the background, so the start is never delayed. A newer one
+    is offered to the user (``AVAILABLE``) and installed only on a yes (``apply``); it runs from the next start.
+    Local builds never offer updates here (``sks-dl update`` still can)."""
+    if env("NO_UPDATE") or not can_self_update() or is_local_build():
         return
     _clean_leftovers(Path(sys.executable))
-    threading.Thread(target=_update_in_background, name="edh-dl-update", daemon=True).start()
+    threading.Thread(target=_check_in_background, name="sks-dl-update", daemon=True).start()

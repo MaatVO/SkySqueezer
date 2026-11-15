@@ -3,8 +3,8 @@ import time
 import numpy as np
 import xarray as xr
 
-from edh_downloader import engine, runner
-from edh_downloader.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, TimeSpec
+from skysqueezer import engine, runner
+from skysqueezer.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, TimeSpec
 
 
 def _spec(fake, home, name):

@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from edh_downloader import keys, quota, service, sources
-from edh_downloader.job import JobSpec
+from skysqueezer import keys, quota, service, sources
+from skysqueezer.job import JobSpec
 
 
 @pytest.fixture

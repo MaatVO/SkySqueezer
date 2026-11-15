@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from edh_downloader import keys, quota, runner, service
-from edh_downloader.job import JobSpec
+from skysqueezer import keys, quota, runner, service
+from skysqueezer.job import JobSpec
 
 
 def test_one_unreadable_job_does_not_hide_the_others(home):

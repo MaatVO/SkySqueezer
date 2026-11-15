@@ -1,14 +1,14 @@
 """One-step access from your own computer: SSH tunnel + server + browser, no manual port forwarding.
 
-The launcher (``edh-dl connect HOST``, or the small scripts from ``edh-dl launcher sh|ps1``, which need only
+The launcher (``sks-dl connect HOST``, or the small scripts from ``sks-dl launcher sh|ps1``, which need only
 ``ssh`` on your computer) does:
 
   1. pick a free port on your computer and a random port on the server, and a fresh access token;
-  2. ``ssh -L <local>:127.0.0.1:<remote> HOST '<edh-dl> serve --stdio --port <remote>'`` and send the token
+  2. ``ssh -L <local>:127.0.0.1:<remote> HOST '<sks-dl> serve --stdio --port <remote>'`` and send the token
      on the server's stdin (it never appears in a command line);
-  3. wait for the server's ``EDH_DL_READY`` line, then open ``http://localhost:<local>/?token=...``.
+  3. wait for the server's ``SKS_DL_READY`` line, then open ``http://localhost:<local>/?token=...``.
 
-Closing the launcher (Ctrl+C) closes the tunnel; the server notices (``EDH_DL_ALIVE`` heartbeats fail) and
+Closing the launcher (Ctrl+C) closes the tunnel; the server notices (``SKS_DL_ALIVE`` heartbeats fail) and
 exits. Download jobs are separate processes and keep running.
 """
 
@@ -21,7 +21,7 @@ import subprocess
 import sys
 import webbrowser
 
-READY, BUSY, ALIVE = "EDH_DL_READY", "EDH_DL_PORT_BUSY", "EDH_DL_ALIVE"
+READY, BUSY, ALIVE = "SKS_DL_READY", "SKS_DL_PORT_BUSY", "SKS_DL_ALIVE"
 
 
 def remote_cmd() -> str:
@@ -44,7 +44,7 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def connect(host: str, cmd: str = "edh-dl", tries: int = 5) -> int:
+def connect(host: str, cmd: str = "sks-dl", tries: int = 5) -> int:
     token = os.urandom(18).hex()
     for _ in range(tries):
         lport, rport = _free_port(), random.randint(20000, 60999)
@@ -61,7 +61,7 @@ def connect(host: str, cmd: str = "edh-dl", tries: int = 5) -> int:
                 line = line.rstrip("\n")
                 if line.startswith(READY):
                     url = f"http://localhost:{lport}/?token={token}"
-                    print(f"Weather Dataset Downloader: {url}\nOpened in your browser. Ctrl+C closes it "
+                    print(f"SkySqueezer: {url}\nOpened in your browser. Ctrl+C closes it "
                           "(download jobs keep running on the server).", flush=True)
                     webbrowser.open(url)
                 elif line.startswith(BUSY):
@@ -82,7 +82,7 @@ def connect(host: str, cmd: str = "edh-dl", tries: int = 5) -> int:
 # ------------------------------------------------------------------ standalone scripts (only ssh needed)
 
 SH = r"""#!/bin/sh
-# Weather Dataset Downloader launcher: opens the web UI of edh-dl on the server in your browser, through SSH.
+# SkySqueezer launcher: opens the web UI of sks-dl on the server in your browser, through SSH.
 # Needs only ssh (macOS, Linux, WSL). Usage:  ./edh-connect [user@host]
 # Ctrl+C closes the UI; download jobs keep running on the server.
 HOST="${1:-__HOST__}"
@@ -103,12 +103,12 @@ for try in 1 2 3 4 5; do
     rc=0
     while IFS= read -r line; do
       case "$line" in
-        EDH_DL_READY*) URL="http://localhost:$LPORT/?token=$TOKEN"
-                       echo "Weather Dataset Downloader: $URL"
+        SKS_DL_READY*) URL="http://localhost:$LPORT/?token=$TOKEN"
+                       echo "SkySqueezer: $URL"
                        echo "Opened in your browser. Ctrl+C closes it (download jobs keep running on the server)."
                        open_url "$URL" ;;
-        EDH_DL_PORT_BUSY*) rc=75 ;;
-        EDH_DL_ALIVE*|"") ;;
+        SKS_DL_PORT_BUSY*) rc=75 ;;
+        SKS_DL_ALIVE*|"") ;;
         *) printf '%s\n' "$line" ;;
       esac
     done
@@ -118,7 +118,7 @@ for try in 1 2 3 4 5; do
 done
 """
 
-PS1 = r"""# Weather Dataset Downloader launcher for Windows: opens the web UI of edh-dl on the server in your browser, through SSH.
+PS1 = r"""# SkySqueezer launcher for Windows: opens the web UI of sks-dl on the server in your browser, through SSH.
 # Needs the OpenSSH client (built into Windows 10/11). Run:  powershell -ExecutionPolicy Bypass -File edh-connect.ps1
 # Ctrl+C closes the UI; download jobs keep running on the server.
 param([string]$Server = "__HOST__")
@@ -140,13 +140,13 @@ for ($try = 0; $try -lt 5; $try++) {
   $p.StandardInput.Close()
   $busy = $false
   while ($null -ne ($line = $p.StandardOutput.ReadLine())) {
-    if ($line.StartsWith("EDH_DL_READY")) {
+    if ($line.StartsWith("SKS_DL_READY")) {
       $url = "http://localhost:$LPort/?token=$Token"
-      Write-Host "Weather Dataset Downloader: $url"
+      Write-Host "SkySqueezer: $url"
       Write-Host "Opened in your browser. Ctrl+C closes it (download jobs keep running on the server)."
       Start-Process $url
-    } elseif ($line.StartsWith("EDH_DL_PORT_BUSY")) { $busy = $true }
-    elseif ($line -and -not $line.StartsWith("EDH_DL_ALIVE")) { Write-Host $line }
+    } elseif ($line.StartsWith("SKS_DL_PORT_BUSY")) { $busy = $true }
+    elseif ($line -and -not $line.StartsWith("SKS_DL_ALIVE")) { Write-Host $line }
   }
   $p.WaitForExit()
   if (-not $busy) { exit $p.ExitCode }

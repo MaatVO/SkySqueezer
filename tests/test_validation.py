@@ -2,9 +2,9 @@
 
 import pytest
 
-from edh_downloader import catalog, keys, runner
-from edh_downloader.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, TimeSpec
-from edh_downloader.planner import Plan, PlanError
+from skysqueezer import catalog, keys, runner
+from skysqueezer.job import AreaSpec, DownloadSpec, JobSpec, OutputSpec, TimeSpec
+from skysqueezer.planner import Plan, PlanError
 
 
 def _plan(home, fake, **kw):
@@ -29,7 +29,7 @@ def test_time_fields_out_of_range_are_refused(home, fake_edh, t):
 
 @pytest.mark.parametrize("name", ["", "  ", "a/b", "..", ".", "x\0y"])
 def test_output_name_must_be_a_plain_file_name(home, fake_edh, name):
-    from edh_downloader import service
+    from skysqueezer import service
 
     s = JobSpec(dataset="fake", dataset_url=fake_edh.url, variables=["t2m"], time=TimeSpec("2019-11-10", "2019-11-20"),
                 output=OutputSpec(directory=str(home / "o"), name=name), download=DownloadSpec(key="test"))

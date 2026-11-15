@@ -1,4 +1,4 @@
-"""Command line: ``edh-dl serve`` for the web UI, plus headless commands for scripting and servers."""
+"""Command line: ``sks-dl serve`` for the web UI, plus headless commands for scripting and servers."""
 
 import argparse
 import asyncio
@@ -20,10 +20,10 @@ def cmd_worker(a):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="edh-dl", description="Earth Data Hub dataset downloader")
+    ap = argparse.ArgumentParser(prog="sks-dl", description="SkySqueezer: weather and climate dataset downloader")
     from . import __version__
 
-    ap.add_argument("--version", action="version", version=f"edh-dl {__version__}")
+    ap.add_argument("--version", action="version", version=f"sks-dl {__version__}")
     ap.add_argument("--no-update", action="store_true", help="do not check for a newer release at start")
     sub = ap.add_subparsers(dest="cmd")
     sub.add_parser("update", help="check for a newer release and install it (packaged executable only)")
@@ -37,9 +37,9 @@ def main(argv=None):
     s.add_argument("--no-token", action="store_true", help="disable the access token (not recommended)")
     s.add_argument("--no-browser", action="store_true", help="do not open a browser (when run on your own computer)")
     s.add_argument("--stdio", action="store_true", help=argparse.SUPPRESS)  # used by the launcher
-    x = sub.add_parser("connect", help="from your computer: open the UI of edh-dl on a server (SSH tunnel + browser)")
-    x.add_argument("host", help="user@server, as for ssh"); x.add_argument("--cmd", dest="cmd_", default="edh-dl",
-                                                                       help="path of edh-dl on the server")
+    x = sub.add_parser("connect", help="from your computer: open the UI of sks-dl on a server (SSH tunnel + browser)")
+    x.add_argument("host", help="user@server, as for ssh"); x.add_argument("--cmd", dest="cmd_", default="sks-dl",
+                                                                       help="path of sks-dl on the server")
     x = sub.add_parser("launcher", help="print a launcher script for your computer (needs only ssh)")
     x.add_argument("kind", choices=["sh", "ps1"], help="sh: macOS/Linux, ps1: Windows")
     x.add_argument("--host", help="user@server (default: as seen from this SSH session)")
@@ -86,7 +86,7 @@ def main(argv=None):
         if not update.can_self_update():
             sys.exit("self-update works only in the packaged executable (from source: git pull / reinstall)")
         if update.check_and_update(force_notice=True):
-            print("updated; run edh-dl again")
+            print("updated; run sks-dl again")
         return
     if a.cmd in (None, "app"):
         if not a.no_update:
@@ -236,7 +236,7 @@ def main(argv=None):
         job = runner.create_job(spec)
         print(f"job {job.name}")
         if a.detach:
-            print(f"started in the background (pid {runner.launch(job)}); follow with: edh-dl log {job.name}")
+            print(f"started in the background (pid {runner.launch(job)}); follow with: sks-dl log {job.name}")
         else:
             sys.exit(0 if runner.run_foreground(job, verbose=True) == "completed" else 1)
     elif a.cmd == "jobs":

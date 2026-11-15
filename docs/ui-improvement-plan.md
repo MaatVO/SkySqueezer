@@ -2,7 +2,7 @@
 
 Source: seven design reviews run on the running UI (design-analysis, craft, accessibility, UX heuristics, Dieter Rams, cognitive load, general review), plus the earlier `.impeccable/critique` of the Jobs tab (24/40).
 
-Written for: the maintainer of Weather Dataset Downloader, to work through in order.
+Written for: the maintainer of SkySqueezer, to work through in order.
 
 ## Status (2026-11-13)
 

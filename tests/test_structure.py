@@ -1,19 +1,19 @@
 """The dataset-structure view: description, tree and drawing for grids, levels, points and sharding."""
 
-from edh_downloader.job import AreaSpec, OutputSpec, Point, TimeSpec
+from skysqueezer.job import AreaSpec, OutputSpec, Point, TimeSpec
 
 from test_engine import spec
 
 
 def _plan(fake_edh, home, **kw):
-    from edh_downloader import catalog
-    from edh_downloader.planner import Plan
+    from skysqueezer import catalog
+    from skysqueezer.planner import Plan
 
     return Plan(spec(fake_edh, home, **kw), catalog.load_dataset(fake_edh.url, "test-key"))
 
 
 def test_structure_grid_levels_sharded(home, fake_edh, tmp_path):
-    from edh_downloader.gui import structure
+    from skysqueezer.gui import structure
 
     p = _plan(fake_edh, home, variables=["t2m", "t", "lsm"], levels=[1000, 500],
               time=TimeSpec("2019-11-03", "2019-12-20", "day", stats={"t2m": ["mean", "max"]}),
@@ -34,7 +34,7 @@ def test_structure_grid_levels_sharded(home, fake_edh, tmp_path):
 
 
 def test_structure_points(home, fake_edh):
-    from edh_downloader.gui import structure
+    from skysqueezer.gui import structure
 
     p = _plan(fake_edh, home, area=AreaSpec("points", points=[Point("a", 1, 1), Point("b", 10, 20)]))
     d = structure.describe(p, 0.5)
@@ -44,8 +44,8 @@ def test_structure_points(home, fake_edh):
 
 def test_structure_from_written_store(home, fake_edh):
     """A completed job's store is described from disk: real chunks, codecs, sizes, both Zarr and Icechunk."""
-    from edh_downloader.gui import structure
-    from edh_downloader.runner import create_job, run_foreground
+    from skysqueezer.gui import structure
+    from skysqueezer.runner import create_job, run_foreground
 
     s = spec(fake_edh, home / "out", variables=["t2m", "t", "lsm"], levels=[1000, 500],
              time=TimeSpec("2019-11-03", "2019-11-20", "day", stats={"t2m": ["mean", "max"]}),
@@ -67,9 +67,9 @@ def test_structure_from_written_store(home, fake_edh):
 
 
 def test_launcher_scripts():
-    from edh_downloader import launcher
+    from skysqueezer import launcher
 
-    sh = launcher.script("sh", "me@host", "/opt/edh-dl")
-    assert 'HOST="${1:-me@host}"' in sh and 'CMD="/opt/edh-dl"' in sh and "serve --stdio" in sh
-    ps = launcher.script("ps1", "me@host", "/opt/edh-dl")
+    sh = launcher.script("sh", "me@host", "/opt/sks-dl")
+    assert 'HOST="${1:-me@host}"' in sh and 'CMD="/opt/sks-dl"' in sh and "serve --stdio" in sh
+    ps = launcher.script("ps1", "me@host", "/opt/sks-dl")
     assert '$Server = "me@host"' in ps and "serve --stdio" in ps

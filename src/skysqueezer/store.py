@@ -72,10 +72,10 @@ def root_attrs(plan: Plan, job_id: str, status: str = "incomplete", extra: dict 
         "Conventions": "CF-1.8",
         "edh_job_id": job_id,
         "edh_status": status,
-        "edh_downloader_version": __version__,
+        "skysqueezer_version": __version__,
         "edh_job": spec.to_dict(),
         "edh_plan": {k: v for k, v in plan.summary().items() if k != "eta_s"},
-        "history": f"{datetime.now(timezone.utc).isoformat(timespec='seconds')} created by edh-downloader {__version__}",
+        "history": f"{datetime.now(timezone.utc).isoformat(timespec='seconds')} created by skysqueezer {__version__}",
     }
     for k, v in (spec.output.extra_attrs or {}).items():
         if not k.startswith("edh_"):
@@ -247,7 +247,7 @@ def update_extended_attrs(repo: ic.Repository, plan: Plan, job_id: str, extra: d
     g = zarr.open_group(s.store, mode="r+")
     hist = g.attrs.get("history", "")
     direction = plan.spec.output.extend_direction or "forward"
-    entry = f"{datetime.now(timezone.utc).isoformat(timespec='seconds')} extended ({direction}) by edh-downloader {__version__}"
+    entry = f"{datetime.now(timezone.utc).isoformat(timespec='seconds')} extended ({direction}) by skysqueezer {__version__}"
     attrs = {
         "edh_last_job_id": job_id,
         "edh_status": "complete",

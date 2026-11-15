@@ -263,7 +263,7 @@ class CDSClient:
     async def __aenter__(self):
         # trust_env: HTTPS_PROXY / NO_PROXY from the environment, for the API and the result store alike
         self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout), trust_env=True,
-                                             headers={"User-Agent": "edh-downloader"})
+                                             headers={"User-Agent": "skysqueezer"})
         return self
 
     async def __aexit__(self, *exc):

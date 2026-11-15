@@ -5,9 +5,9 @@ runs it, and a folder on disk is the only link between the two.
 
 ## The job file
 
-[job.py](../src/edh_downloader/job.py) defines `JobSpec`, everything the user chose, serialised as `job.json`.
+[job.py](../src/skysqueezer/job.py) defines `JobSpec`, everything the user chose, serialised as `job.json`.
 The GUI only builds it and the engine only reads it, so a job file made on one machine runs on another
-(`edh-dl run job.json`).
+(`sks-dl run job.json`).
 
 | Section | Fields (main ones) |
 |---|---|
@@ -23,14 +23,14 @@ their default, so a job written by an older or newer version still loads.
 
 ## The job folder
 
-Each job lives in `<data>/jobs/<id>/` (`~/.local/share/edh-dl/jobs/` by default):
+Each job lives in `<data>/jobs/<id>/` (`~/.local/share/sks-dl/jobs/` by default):
 
 | File | Written by | Purpose |
 |---|---|---|
 | `job.json` | `runner.create_job` | The spec, the job id and its creation time |
 | `state.json` | the worker | Status, progress, completed units, rates, the current activity, errors |
 | `control.json` | the UI and CLI | Requests to the worker: `connections`, `max_inflight`, `action` (`pause`, `cancel`) |
-| `log.txt` | the worker | The job's log (the job card's **Log**, `edh-dl log ID`) |
+| `log.txt` | the worker | The job's log (the job card's **Log**, `sks-dl log ID`) |
 | `worker.out` | the worker | Standard output and errors of the process (useful if it dies before logging) |
 | `run.lock`, `launch.lock` | runner | One worker per job, even after two clicks on Resume |
 | `requests.json` | CDS engine | The request ledger (see [Climate Data Store](climate-data-store.md)) |
@@ -87,13 +87,13 @@ What makes resuming safe:
 ## Command line
 
 ```bash
-edh-dl run job.json --detach     # create the job folder and start a worker
-edh-dl jobs                      # list jobs
-edh-dl status ID                 # state.json, readable
-edh-dl log ID                    # the log
-edh-dl pause ID | resume ID | cancel ID
-edh-dl resume ID --connections 8
-edh-dl export ID                 # export a job's repository to Zarr again
+sks-dl run job.json --detach     # create the job folder and start a worker
+sks-dl jobs                      # list jobs
+sks-dl status ID                 # state.json, readable
+sks-dl log ID                    # the log
+sks-dl pause ID | resume ID | cancel ID
+sks-dl resume ID --connections 8
+sks-dl export ID                 # export a job's repository to Zarr again
 ```
 
 `ID` can be the job folder, the full id, or any beginning or end of the id that matches one job only.

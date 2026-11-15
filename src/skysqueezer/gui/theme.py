@@ -2,6 +2,8 @@
 
 from nicegui import ui
 
+from .fold import CSS as FOLD_CSS
+
 BG = "#12161c"
 SURFACE = "#1a2029"
 SURFACE_2 = "#232b37"
@@ -83,7 +85,6 @@ html, body {{ background: var(--edh-bg) !important; color: var(--edh-text); font
 .edh-subtitle {{ font-size: var(--edh-fs-md); font-weight: 500; }}
 .edh-muted {{ color: var(--edh-muted) !important; }}
 .edh-mono {{ font-family: 'Roboto Mono', monospace; }}
-.edh-step {{ min-width: 1.4rem; color: var(--edh-accent-text); font-size: var(--edh-fs-lg); font-weight: 500; }}
 .edh-sep {{ display: none; }}
 .edh-kpi-label {{ font-size: var(--edh-fs-xs); color: var(--edh-muted); }}
 .edh-kpi-value {{ font-size: var(--edh-fs-lg); font-weight: 500; line-height: 1.3; }}
@@ -234,6 +235,7 @@ html {{ scrollbar-color: var(--edh-surface-2) var(--edh-bg); }}
 
 def apply_theme() -> None:
     ui.add_head_html(CSS)
+    ui.add_head_html(f"<style>{FOLD_CSS}</style>")
     ui.add_head_html('<script>document.documentElement.lang = "en";</script>')
     # Quasar's own page loading bar is a progressbar without a name
     ui.add_head_html('<script>new MutationObserver(() => document.querySelectorAll("[role=progressbar]:not([aria-label])")'

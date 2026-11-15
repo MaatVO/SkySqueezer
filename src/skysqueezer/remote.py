@@ -1,6 +1,6 @@
 """Work on a server from your computer over one SSH connection (asyncssh, no ssh binary needed).
 
-The interface runs here; the server runs ``edh-dl agent``, which holds the keys, quota, jobs and data. Nothing big
+The interface runs here; the server runs ``sks-dl agent``, which holds the keys, quota, jobs and data. Nothing big
 is uploaded: the server gets a zip with this app's Python code (a few hundred KB, again only when it changes) and
 a virtual environment with the numerical packages, installed once. Closing the session stops the agent; download
 jobs run detached and keep going.
@@ -21,7 +21,8 @@ from . import __version__, backend, bundle, sshconfig
 from .paths import config_dir
 from .util import read_json, write_json_atomic
 
-STATE_DIR = "~/.local/share/edh-dl"  # on the server: venv-<deps id>/ and agent/<build>.zip
+STATE_DIR = "~/.local/share/sks-dl"  # on the server: venv-<deps id>/ and agent/<build>.zip
+LEGACY_STATE_DIR = "~/.local/share/edh-dl"  # before the SkySqueezer rename: used while it is the only one
 DEPS = ["aiohttp>=3.9", "icechunk>=2", "numcodecs>=0.15", "numpy>=2", "pandas>=2.2", "xarray>=2024.10", "zarr>=3"]
 PROBE = "import aiohttp, icechunk, numcodecs, numpy, pandas, xarray, zarr"
 # GRIB and NetCDF decoding for Climate Data Store jobs. Optional: their binary wheels need glibc 2.28+ (macOS 15+),
@@ -50,7 +51,7 @@ class Server:
     user: str = ""
     port: int = 0  # 0: from ~/.ssh/config, else 22
     key_file: str = ""  # empty: agent and default keys (~/.ssh/id_*), as ssh does
-    cmd: str = ""  # path of edh-dl on the server; empty: detect
+    cmd: str = ""  # path of sks-dl on the server; empty: detect
     label: str = ""
 
     @property
@@ -195,6 +196,15 @@ async def _home(conn) -> str:
     return out.strip()
 
 
+async def _state_dir(conn) -> str:
+    """The app's folder on the server: ``~/.local/share/sks-dl``, unless only the pre-rename ``edh-dl`` one exists.
+    The same rule as ``paths.data_dir`` there, so the agent and its environment share one folder."""
+    home = await _home(conn)
+    new, old = STATE_DIR.replace("~", home, 1), LEGACY_STATE_DIR.replace("~", home, 1)
+    rc, _ = await _sh(conn, f"test -d {shlex.quote(old)} && ! test -e {shlex.quote(new)}")
+    return old if rc == 0 else new
+
+
 async def _env_ok(conn, py: str) -> bool:
     rc, _ = await _sh(conn, f"{shlex.quote(py)} -c {shlex.quote(PROBE)} 2>/dev/null")
     return rc == 0
@@ -215,8 +225,7 @@ async def setup(conn, log=lambda m: None) -> dict:
     """Create ``<state>/venv-<deps id>`` on the server and install the packages (uv when there, else python3 -m
     venv). A new directory: environments that running jobs use are left alone. An environment whose python exists
     is not cleared (it may be in use): only the packages are installed into it. Returns ``capabilities``."""
-    home = await _home(conn)
-    state = STATE_DIR.replace("~", home, 1)
+    state = await _state_dir(conn)
     venv = venv_dir(state)
     py = f"{venv}/bin/python"
     deps = " ".join(shlex.quote(d) for d in DEPS)
@@ -288,8 +297,7 @@ async def open_session(s: Server, password: str | None = None, passphrase: str |
     log(f"connecting to {s.name} …")
     conn = await _connect(s, password, passphrase)
     try:
-        home = await _home(conn)
-        state = STATE_DIR.replace("~", home, 1)
+        state = await _state_dir(conn)
         py = await _python(conn, state)
         if py is None:
             if not install_ok:
@@ -299,7 +307,7 @@ async def open_session(s: Server, password: str | None = None, passphrase: str |
         zip_path = await _upload_bundle(conn, state, log)
         log("starting the agent …")
         proc = await conn.create_process(
-            f"PYTHONPATH={shlex.quote(zip_path)} PYTHONDONTWRITEBYTECODE=1 exec {shlex.quote(py)} -m edh_downloader agent",
+            f"PYTHONPATH={shlex.quote(zip_path)} PYTHONDONTWRITEBYTECODE=1 exec {shlex.quote(py)} -m skysqueezer agent",
             term_type=None)
         try:
             line = await asyncio.wait_for(proc.stdout.readline(), timeout=90)

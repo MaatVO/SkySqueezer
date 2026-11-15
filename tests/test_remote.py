@@ -4,7 +4,7 @@ import json
 
 
 def test_remembered_servers(home):
-    from edh_downloader import remote
+    from skysqueezer import remote
 
     a = remote.Server(host="hpc.example.org", user="me", key_file="~/.ssh/id_ed25519")
     remote.remember(a)
@@ -19,10 +19,11 @@ def test_remembered_servers(home):
 
 
 class _FakeConn:
-    """Records the shell commands; ``ok`` holds the python paths whose probe import succeeds."""
+    """Records the shell commands; ``ok`` holds the python paths whose probe import succeeds, ``dirs`` the folders
+    that exist (for ``test -d``/``test -e``)."""
 
-    def __init__(self, ok):
-        self.ok, self.cmds = set(ok), []
+    def __init__(self, ok, dirs=()):
+        self.ok, self.cmds, self.dirs = set(ok), [], set(dirs)
 
     async def run(self, cmd, check=False):
         import shlex
@@ -36,6 +37,9 @@ class _FakeConn:
             return SimpleNamespace(exit_status=0 if shlex.split(inner)[0] in self.ok else 1, stdout="")
         if inner.startswith("command -v uv"):
             return SimpleNamespace(exit_status=0, stdout="")
+        if inner.startswith("test -d ") and " && ! test -e " in inner:  # _state_dir: only the old folder?
+            old, new = (shlex.split(x)[2] for x in inner.split(" && ! "))
+            return SimpleNamespace(exit_status=0 if old in self.dirs and new not in self.dirs else 1, stdout="")
         return SimpleNamespace(exit_status=0, stdout="")
 
     async def create_process(self, cmd, term_type=None):
@@ -47,7 +51,7 @@ class _FakeConn:
 
             async def wait(self):
                 pass
-        self.ok.add(f"/home/u/.local/share/edh-dl/venv-{__import__('edh_downloader.remote').remote.DEPS_ID}/bin/python")
+        self.ok.add(f"/home/u/.local/share/sks-dl/venv-{__import__('skysqueezer.remote').remote.DEPS_ID}/bin/python")
         return P()
 
     async def _lines(self):
@@ -58,22 +62,22 @@ class _FakeConn:
 def test_existing_server_keeps_its_environment(monkeypatch):
     import asyncio
 
-    from edh_downloader import remote
+    from skysqueezer import remote
 
-    legacy = "/home/u/.local/share/edh-dl/venv/bin/python"
+    legacy = "/home/u/.local/share/sks-dl/venv/bin/python"
     monkeypatch.setattr(remote, "OPTIONAL_DEPS", [])  # the same packages as before: nothing to install
-    assert asyncio.run(remote._python(_FakeConn({legacy}), "/home/u/.local/share/edh-dl")) == legacy
+    assert asyncio.run(remote._python(_FakeConn({legacy}), "/home/u/.local/share/sks-dl")) == legacy
 
 
 def test_grib_support_gets_a_new_environment_and_may_fail(monkeypatch):
     """Adding the optional GRIB packages builds a new environment once; their failure does not stop the setup."""
     import asyncio
 
-    from edh_downloader import remote
+    from skysqueezer import remote
 
-    legacy = "/home/u/.local/share/edh-dl/venv/bin/python"
+    legacy = "/home/u/.local/share/sks-dl/venv/bin/python"
     conn = _FakeConn({legacy})
-    assert asyncio.run(remote._python(conn, "/home/u/.local/share/edh-dl")) is None
+    assert asyncio.run(remote._python(conn, "/home/u/.local/share/sks-dl")) is None
     orig = conn.create_process
 
     async def optional_fails(cmd, term_type=None):
@@ -93,17 +97,28 @@ def test_new_dependencies_install_beside_the_running_environment(monkeypatch):
     """A newer app needing other packages must not rebuild the environment a running job uses."""
     import asyncio
 
-    from edh_downloader import remote
+    from skysqueezer import remote
 
     monkeypatch.setattr(remote, "DEPS", remote.DEPS + ["somethingnew>=1"])
     monkeypatch.setattr(remote, "DEPS_ID", "newdeps123")
-    legacy = "/home/u/.local/share/edh-dl/venv/bin/python"
+    legacy = "/home/u/.local/share/sks-dl/venv/bin/python"
     conn = _FakeConn({legacy})
-    assert asyncio.run(remote._python(conn, "/home/u/.local/share/edh-dl")) is None  # needs setup
+    assert asyncio.run(remote._python(conn, "/home/u/.local/share/sks-dl")) is None  # needs setup
     asyncio.run(remote.setup(conn))
     touched = " ".join(conn.cmds)
     assert "venv-newdeps123" in touched
-    assert "/edh-dl/venv " not in touched + " " and "--clear /home/u/.local/share/edh-dl/venv'" not in touched
+    assert "/sks-dl/venv " not in touched + " " and "--clear /home/u/.local/share/sks-dl/venv'" not in touched
     for c in conn.cmds:
         if "--clear" in c:
             assert "venv-newdeps123" in c, f"rebuilds an environment in use: {c}"
+
+
+def test_a_server_from_before_the_rename_keeps_its_folder():
+    import asyncio
+
+    from skysqueezer import remote
+
+    old, new = "/home/u/.local/share/edh-dl", "/home/u/.local/share/sks-dl"
+    assert asyncio.run(remote._state_dir(_FakeConn(set()))) == new
+    assert asyncio.run(remote._state_dir(_FakeConn(set(), dirs={old}))) == old  # its jobs and keys stay found
+    assert asyncio.run(remote._state_dir(_FakeConn(set(), dirs={old, new}))) == new

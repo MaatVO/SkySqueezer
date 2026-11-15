@@ -1,4 +1,4 @@
-"""``edh-dl agent``: the work side of a connection. Reads JSON requests on stdin, answers on stdout, one per line.
+"""``sks-dl agent``: the work side of a connection. Reads JSON requests on stdin, answers on stdout, one per line.
 
 Started over SSH by the app on your computer; it holds the keys, quota, datasets, jobs and output stores of this
 machine. Requests run in threads (a long download sample does not block the others). The process ends when the

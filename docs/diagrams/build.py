@@ -149,13 +149,13 @@ def where_it_runs():
     d.frame(30, 84, 410, 410, "Your computer", "ui")
     d.box(60, 124, 350, 62, "Browser", ["one tab per connection"], "file")
     d.arrow([(235, 186), (235, 212)])
-    d.box(60, 214, 350, 80, "edh-dl app (NiceGUI)", ["gui/connect.py: servers and tabs", "gui/app.py: the job form, keys, jobs"], "ui")
+    d.box(60, 214, 350, 80, "sks-dl app (NiceGUI)", ["gui/connect.py: servers and tabs", "gui/app.py: the job form, keys, jobs"], "ui")
     d.arrow([(235, 294), (235, 320)])
     d.box(60, 322, 350, 80, "backend.Local / backend.Remote", ["await call(method, **kwargs)", "same JSON answers either way"], "ui")
     d.text(60, 440, "This computer: Local runs service.py", size=12.5, fill=MUTED)
     d.text(60, 458, "in the same process, no SSH involved.", size=12.5, fill=MUTED)
     d.frame(520, 84, 410, 410, "Server (or this computer)", "proc")
-    d.box(550, 124, 350, 80, "edh-dl agent", ["JSON lines on stdin / stdout", "one thread per request"], "proc")
+    d.box(550, 124, 350, 80, "sks-dl agent", ["JSON lines on stdin / stdout", "one thread per request"], "proc")
     d.arrow([(725, 204), (725, 230)], "proc")
     d.box(550, 232, 350, 80, "service.py", ["keys, quota, catalogues, plans,", "jobs, output stores"], "proc")
     d.arrow([(640, 312), (640, 346)], "proc", label="launch", at=(605, 334))
@@ -457,17 +457,17 @@ def remote_connect():
     d = D(960, 590, "Connecting to a server",
           "What the app does over one SSH connection (asyncssh: no ssh binary needed).")
     L, R = 200, 740
-    d.box(L - 150, 80, 300, 48, "Your computer: edh-dl app", [], "ui", size=14.5)
+    d.box(L - 150, 80, 300, 48, "Your computer: sks-dl app", [], "ui", size=14.5)
     d.box(R - 150, 80, 300, 48, "Server", [], "proc", size=14.5)
     for x, k in ((L, "ui"), (R, "proc")):
         d.raw(f'<path d="M{x} 128 V530" stroke="{KINDS[k][1]}" stroke-width="2" stroke-dasharray="4 6"/>')
     steps = [
         ("→", "connect: ~/.ssh/config, ProxyJump, key, agent or password", "ui"),
         ("→", "unknown host key? you check the fingerprint once", "ui"),
-        ("→", "look for venv-<deps id> in ~/.local/share/edh-dl", "proc"),
+        ("→", "look for venv-<deps id> in ~/.local/share/sks-dl", "proc"),
         ("→", "missing: create it with uv (or python3 -m venv), once", "proc"),
         ("→", "upload agent.zip, only when the build id changed", "proc"),
-        ("→", "start: python -m edh_downloader agent", "proc"),
+        ("→", "start: python -m skysqueezer agent", "proc"),
         ("←", "hello: version and capabilities", "ok"),
         ("⇄", "JSON requests and answers: keys, plans, jobs, logs", "cds"),
     ]
@@ -484,7 +484,7 @@ def remote_connect():
         d.label((L + R) / 2, y - 8, text, k, 12)
     d.text(28, 548, "Closing the tab ends the agent. Download jobs are separate detached processes on the server and "
            "keep running.", size=12.5, fill=MUTED)
-    d.text(28, 566, "Without the app: edh-dl launcher sh | ps1 prints a script that opens the same UI through a plain "
+    d.text(28, 566, "Without the app: sks-dl launcher sh | ps1 prints a script that opens the same UI through a plain "
            "ssh tunnel.", size=12.5, fill=MUTED)
     d.save("remote-connect")
 
@@ -497,16 +497,16 @@ def release_update():
     d.arrow([(600, 133), (636, 133)])
     d.box(640, 90, 290, 86, "GitHub release", ["executables, checksums,", "notes from the commits"], "store")
     d.arrow([(785, 176), (785, 206), (115, 206), (115, 226)], "store", dash=True)
-    d.box(30, 230, 200, 96, "edh-dl starts", ["never delayed:", "the check runs alongside"], "ui")
+    d.box(30, 230, 200, 96, "sks-dl starts", ["never delayed:", "the check runs alongside"], "ui")
     d.arrow([(230, 278), (256, 278)])
-    d.box(260, 230, 210, 96, "Newer release?", ["asks GitHub for the", "latest one, in background"], "ext")
+    d.box(260, 230, 210, 96, "Newer release?", ["found in the background:", "a pop-up asks you first"], "ext")
     d.arrow([(470, 278), (496, 278)])
-    d.box(500, 230, 200, 96, "Download + verify", ["SHA-256 must match", "else nothing changes"], "proc")
+    d.box(500, 230, 200, 96, "Download + verify", ["only on your yes;", "SHA-256 must match"], "proc")
     d.arrow([(700, 278), (726, 278)], "ok")
     d.box(730, 230, 200, 96, "Swap the executable", ["the running one goes on;", "new version next start"], "ok")
     d.text(30, 360, "Only the packaged executable updates itself (not source or uv tool installs, not +local builds).",
            size=12.5, fill=MUTED)
-    d.text(30, 378, "Opt out with --no-update or EDH_DL_NO_UPDATE=1; edh-dl update does it on demand.",
+    d.text(30, 378, "Opt out with --no-update or SKS_DL_NO_UPDATE=1; sks-dl update does it on demand.",
            size=12.5, fill=MUTED)
     d.save("release-update")
 

@@ -6,9 +6,9 @@ import time
 
 import pytest
 
-from edh_downloader import catalog
-from edh_downloader.gui.app import option_template
-from edh_downloader.util import write_json_atomic
+from skysqueezer import catalog
+from skysqueezer.gui.app import option_template
+from skysqueezer.util import write_json_atomic
 
 PNG = "https://static.example.org/era5/thumb.png"
 
@@ -71,7 +71,7 @@ def test_option_template_cannot_be_broken_out_of():
 
 
 def test_datasets_are_found_by_their_keyword_values():
-    from edh_downloader.gui.app import search_text
+    from skysqueezer.gui.app import search_text
 
     item = {"keywords": ["Product type: Reanalysis", "Variable domain: Land (hydrology)", "Europe"]}
     assert search_text(item) == "Reanalysis Land (hydrology) Europe"

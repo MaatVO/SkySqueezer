@@ -4,7 +4,7 @@
 <text x="28" y="40" font-size="21" font-weight="750" fill="#1F2A37">Connecting to a server</text>
 <text x="28" y="62" font-size="13.5" fill="#5B6675">What the app does over one SSH connection (asyncssh: no ssh binary needed).</text>
 <rect x="50" y="80" width="300" height="48" rx="12" fill="#E8F0FF" stroke="#3B7BF0" stroke-width="2"/>
-<text x="200.0" y="109.0" font-size="14.5" font-weight="650" fill="#1F2A37" text-anchor="middle">Your computer: edh-dl app</text>
+<text x="200.0" y="109.0" font-size="14.5" font-weight="650" fill="#1F2A37" text-anchor="middle">Your computer: sks-dl app</text>
 <rect x="590" y="80" width="300" height="48" rx="12" fill="#F1E8FF" stroke="#7B34DB" stroke-width="2"/>
 <text x="740.0" y="109.0" font-size="14.5" font-weight="650" fill="#1F2A37" text-anchor="middle">Server</text>
 <path d="M200 128 V530" stroke="#3B7BF0" stroke-width="2" stroke-dasharray="4 6"/>
@@ -23,7 +23,7 @@
 <text x="170" y="264.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">3</text>
 <path d="M200 260 L736 260" fill="none" stroke="#7B34DB" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#a-proc)"/>
 <rect x="303.7" y="241.0" width="332.6" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="470.0" y="254" font-size="12" font-weight="600" fill="#7B34DB" text-anchor="middle">look for venv-&lt;deps id&gt; in ~/.local/share/edh-dl</text>
+<text x="470.0" y="254" font-size="12" font-weight="600" fill="#7B34DB" text-anchor="middle">look for venv-&lt;deps id&gt; in ~/.local/share/sks-dl</text>
 <circle cx="170" cy="306" r="12" fill="#7B34DB"/>
 <text x="170" y="310.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">4</text>
 <path d="M200 306 L736 306" fill="none" stroke="#7B34DB" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#a-proc)"/>
@@ -37,8 +37,8 @@
 <circle cx="170" cy="398" r="12" fill="#7B34DB"/>
 <text x="170" y="402.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">6</text>
 <path d="M200 398 L736 398" fill="none" stroke="#7B34DB" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#a-proc)"/>
-<rect x="340.7" y="379.0" width="258.6" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="470.0" y="392" font-size="12" font-weight="600" fill="#7B34DB" text-anchor="middle">start: python -m edh_downloader agent</text>
+<rect x="350.8" y="379.0" width="238.5" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="470.0" y="392" font-size="12" font-weight="600" fill="#7B34DB" text-anchor="middle">start: python -m skysqueezer agent</text>
 <circle cx="170" cy="444" r="12" fill="#1C9A5A"/>
 <text x="170" y="448.5" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">7</text>
 <path d="M740 444 L204 444" fill="none" stroke="#1C9A5A" stroke-width="2.2" stroke-linejoin="round" marker-end="url(#a-ok)"/>
@@ -50,5 +50,5 @@
 <rect x="297.0" y="471.0" width="346.0" height="18" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
 <text x="470.0" y="484" font-size="12" font-weight="600" fill="#0E8E9A" text-anchor="middle">JSON requests and answers: keys, plans, jobs, logs</text>
 <text x="28" y="548" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="start">Closing the tab ends the agent. Download jobs are separate detached processes on the server and keep running.</text>
-<text x="28" y="566" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="start">Without the app: edh-dl launcher sh | ps1 prints a script that opens the same UI through a plain ssh tunnel.</text>
+<text x="28" y="566" font-size="12.5" font-weight="400" fill="#5B6675" text-anchor="start">Without the app: sks-dl launcher sh | ps1 prints a script that opens the same UI through a plain ssh tunnel.</text>
 </svg>

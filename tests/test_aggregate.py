@@ -1,6 +1,6 @@
 import numpy as np
 
-from edh_downloader.aggregate import bitround, reduce_periods
+from skysqueezer.aggregate import bitround, reduce_periods
 
 
 def test_reduce_daily_and_uneven():
