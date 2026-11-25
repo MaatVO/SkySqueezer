@@ -1,6 +1,7 @@
 """Test fixtures: an isolated app home and a fake Earth Data Hub serving a synthetic ERA5-like Zarr."""
 
 import asyncio
+import os
 import threading
 from pathlib import Path
 
@@ -10,6 +11,8 @@ import zarr
 from aiohttp import web
 from zarr.codecs.numcodecs import BitRound
 from zarr.codecs import BloscCodec
+
+os.environ["SKS_DL_TRUSTED_HOSTS"] = "127.0.0.1"  # the fake servers get the test key (inherited by job workers)
 
 NT, NLAT, NLON, NLEV = 24 * 50, 21, 40, 3  # 50 days hourly, 1-degree-ish grid
 TC, CY, CX = 240, 6, 8

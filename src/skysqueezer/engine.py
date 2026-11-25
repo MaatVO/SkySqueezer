@@ -82,7 +82,7 @@ class Engine:
         meta = read_json(self.dir / "job.json", None, dict)
         if meta is None or not isinstance(meta.get("spec"), dict):
             raise FileNotFoundError(self.dir / "job.json")
-        self.job_id = meta.get("id", self.dir.name)
+        self.job_id = self.dir.name  # never from job.json: the id names folders that get deleted
         self.spec = JobSpec.from_dict(meta["spec"])
         o = self.spec.output
         if o.target_mode == "extend":
@@ -750,9 +750,13 @@ def _grace():
 def setup_logging(job_dir: Path, to_stdout: bool) -> logging.Logger:
     log = logging.getLogger("edh")
     log.setLevel(logging.INFO)
+    for h in log.handlers:  # a previous run in this process (tests): close its file
+        h.close()
     log.handlers.clear()
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%S")
-    fh = logging.FileHandler(Path(job_dir) / "log.txt")
+    from .runner import open_nofollow
+
+    fh = logging.StreamHandler(open_nofollow(Path(job_dir) / "log.txt"))  # a symlink planted there is refused
     fh.setFormatter(fmt)
     log.addHandler(fh)
     if to_stdout:

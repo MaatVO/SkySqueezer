@@ -110,4 +110,12 @@ def share_files() -> None:
     resume a job: its state, its temporary chunks and its Icechunk repository. Private files (API keys) set their
     own mode."""
     if shared_jobs_dir():
+        # umask 002 would leave new folders of this account group-writable: the app's private folders (keys,
+        # request counts, the catalogue and sample caches that jobs trust) are made private first
+        for d in (config_dir(), data_dir(), cache_dir()):
+            if d.name in (NAME, LEGACY_NAME) and not d.is_symlink():
+                try:
+                    d.chmod(0o700)
+                except OSError:
+                    pass
         os.umask(0o002)

@@ -62,6 +62,22 @@ def proxy_from_env() -> str | None:
 DATA_HOST = "data.earthdatahub.destine.eu"
 
 
+def key_allowed(url: str) -> bool:
+    """Whether the API key may be sent to ``url``: only to Earth Data Hub, over HTTPS. A dataset URL comes from a
+    job file, which in a shared jobs folder any group member can edit; without this check a job pointed at another
+    server would hand it the key of whoever resumes the job. ``SKS_DL_TRUSTED_HOSTS`` (comma-separated host names)
+    adds hosts, for tests and mirrors."""
+    from urllib.parse import urlsplit
+
+    from .paths import env
+
+    sp = urlsplit(url)
+    host = (sp.hostname or "").lower()
+    if host == DATA_HOST and sp.scheme == "https":
+        return True
+    return host in {h.strip().lower() for h in (env("TRUSTED_HOSTS") or "").split(",") if h.strip()}
+
+
 class EDHClient:
     def __init__(self, secret: str, counter: RequestCounter | None = None, connections: int = 8,
                  timeout: float = 300, retries: int = 6):
@@ -76,7 +92,7 @@ class EDHClient:
 
     async def __aenter__(self):
         self.session = aiohttp.ClientSession(
-            headers={"Authorization": f"Bearer {self.secret}", "User-Agent": "skysqueezer"},
+            headers={"User-Agent": "skysqueezer"},  # the key is added per request, see key_allowed
             timeout=aiohttp.ClientTimeout(total=self.timeout),
             connector=aiohttp.TCPConnector(limit=max(1, self.connections), ttl_dns_cache=600),
             trust_env=False,  # True would also inject ~/.netrc auth and clash with the Bearer header
@@ -96,7 +112,8 @@ class EDHClient:
             if self.counter:
                 self.counter.reserve()
             try:
-                async with self.session.get(url, proxy=self.proxy) as r:
+                auth = {"Authorization": f"Bearer {self.secret}"} if key_allowed(url) else {}
+                async with self.session.get(url, proxy=self.proxy, headers=auth) as r:
                     if r.status == 404 and missing_ok:
                         return None
                     if r.status == 404:

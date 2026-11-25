@@ -105,6 +105,21 @@ def create_job(spec: JobSpec) -> Path:
     return d
 
 
+JOB_FILES = ("job.json", "state.json", "control.json", "log.txt", "worker.out", "run.lock", "launch.lock")
+
+
+def planted_links(job_dir: Path) -> list[str]:
+    """Files of a job folder that are symlinks. In a shared jobs folder a group member could point one at a file
+    of the account that resumes the job, which would then write into it: such a job is refused."""
+    return [n for n in JOB_FILES if (Path(job_dir) / n).is_symlink()]
+
+
+def open_nofollow(path: Path):
+    """Open for appending, refusing a symlink (shared jobs folder: see ``planted_links``)."""
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o666)
+    return os.fdopen(fd, "a", buffering=1)
+
+
 def resolve(job: str | Path) -> Path:
     p = Path(job)
     if (p / "job.json").exists():
@@ -148,7 +163,7 @@ def status(job_dir: Path) -> dict:
     meta = read_json(job_dir / "job.json", {}, dict)
     st = read_json(job_dir / "state.json", {}, dict)
     s = dict(st)
-    s["id"] = meta.get("id", job_dir.name)
+    s["id"] = job_dir.name
     s["dir"] = str(job_dir)
     s["created"] = meta.get("created")
     s["created_by"] = meta.get("created_by")
@@ -156,6 +171,9 @@ def status(job_dir: Path) -> dict:
     if not s["spec"]:
         s["status"] = "unreadable"
         s["error"] = "job.json is missing or damaged: this job cannot run (delete it)"
+    if links := planted_links(job_dir):
+        s["status"] = "unreadable"
+        s["error"] = f"{', '.join(links)} in the job folder is a symbolic link: refused, as a safety measure"
     just_launched = st.get("status") == "starting" and time.time() - (st.get("launched_at") or 0) < START_GRACE
     alive = run_lock_held(job_dir) or pid_alive(st.get("pid"), job_dir) or (
         just_launched and _pid_exists(st.get("pid")))
@@ -203,7 +221,7 @@ def _launch(job_dir: Path) -> int:
     ctl = read_json(job_dir / "control.json", {}, dict)
     ctl.pop("action", None)
     write_json_atomic(job_dir / "control.json", ctl)
-    out = open(job_dir / "worker.out", "ab")
+    out = open_nofollow(job_dir / "worker.out")
     env = dict(os.environ)
     env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"  # the worker unpacks its own copy; it outlives the parent
     p = subprocess.Popen(_self_cmd() + ["_worker", str(job_dir)], stdin=subprocess.DEVNULL, stdout=out,
@@ -272,6 +290,19 @@ def stop(job_dir: Path, action: str = "pause", wait: float = 0) -> bool:
     return True
 
 
+def is_store(p: Path) -> bool:
+    """Whether ``p`` is a Zarr or Icechunk store, so deleting a job's outputs never removes another folder (in a
+    shared jobs folder, job.json can be edited by any group member)."""
+    p = Path(p)
+    if p.is_symlink() or not p.is_dir():
+        return False
+    if p.suffix == ".zarr":
+        return (p / "zarr.json").is_file()
+    if p.suffix == ".icechunk":
+        return (p / "refs").is_dir() or (p / "snapshots").is_dir() or (p / "repo").is_file()
+    return False
+
+
 def delete(job_dir: Path, outputs: bool = False) -> None:
     job_dir = Path(job_dir)
     st = status(job_dir)
@@ -282,6 +313,6 @@ def delete(job_dir: Path, outputs: bool = False) -> None:
         spec.remove_spool(job_dir.name, job_dir)
     if outputs and spec:
         for p in (spec.icechunk_path, spec.zarr_path):
-            if p.exists():
+            if p.exists() and is_store(p):
                 shutil.rmtree(p)
     shutil.rmtree(job_dir)

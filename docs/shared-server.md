@@ -47,6 +47,16 @@ With a shared jobs folder the app creates files with umask `002`, so the group c
 temporary chunks and the Icechunk repository. The output folder must be group-writable too (for the NAS, see the
 mount options below).
 
+### Who to put in the group
+
+Everyone in the group can change every job in the shared folder, so add only people you trust with your
+downloads. The app still guards your account against a job file that was tampered with:
+
+- your API key is sent only to Earth Data Hub over HTTPS, whatever dataset URL a job names;
+- a job folder containing a symbolic link (e.g. its log pointing at a file of yours) is refused;
+- deleting a job's outputs removes only real Zarr or Icechunk stores, never another folder;
+- the app's own folders (keys, request counts, caches) are made private (mode 700).
+
 ### Continuing a colleague's job
 
 - **Stopped job** (e.g. *Paused at quota limit*): **Resume** asks which of your keys to use. The job continues

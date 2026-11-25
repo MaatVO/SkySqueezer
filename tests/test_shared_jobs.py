@@ -127,3 +127,63 @@ def test_folder_check_writes_an_icechunk_repository(home):
     assert r["ok"], r
     assert [c["name"] for c in r["checks"]][:2] == ["free space", "writable"]
     assert not any(p.name.startswith(".sks-check-") for p in (home / "nas" / "dsipdata").iterdir())
+
+
+# ------------------------------------------------------------------ a shared folder any group member can edit
+
+def test_api_key_is_sent_only_to_earth_data_hub(monkeypatch):
+    from skysqueezer.http import key_allowed
+
+    monkeypatch.delenv("SKS_DL_TRUSTED_HOSTS", raising=False)
+    assert key_allowed("https://data.earthdatahub.destine.eu/era5/x.zarr/zarr.json")
+    assert not key_allowed("http://data.earthdatahub.destine.eu/era5/x.zarr/zarr.json")  # never in clear text
+    assert not key_allowed("https://data.earthdatahub.destine.eu.evil.example/x")
+    assert not key_allowed("https://evil.example/data.earthdatahub.destine.eu/x")
+    assert not key_allowed("http://127.0.0.1:9999/x")
+    monkeypatch.setenv("SKS_DL_TRUSTED_HOSTS", "127.0.0.1")
+    assert key_allowed("http://127.0.0.1:9999/x")
+
+
+def test_job_pointed_at_another_server_does_not_get_the_key(home, fake_edh, monkeypatch):
+    monkeypatch.delenv("SKS_DL_TRUSTED_HOSTS")  # the fake server is now "another server"
+    d = runner.create_job(_spec(fake_edh, home / "out"))
+    assert runner.run_foreground(d) == "failed"
+    assert "401" in (runner.status(d).get("error") or "")  # it answered without seeing the key
+
+
+def test_symlinks_planted_in_a_job_folder_are_refused(home, fake_edh):
+    d = runner.create_job(_spec(fake_edh, home / "out"))
+    victim = home / "victims-file"
+    victim.write_text("keep me\n")
+    (d / "log.txt").symlink_to(victim)
+    st = runner.status(d)
+    assert st["status"] == "unreadable" and "log.txt" in st["error"]
+    try:
+        runner.launch(d)
+        raise AssertionError("launched a job with a planted symlink")
+    except RuntimeError:
+        pass
+    assert victim.read_text() == "keep me\n"
+
+
+def test_job_id_comes_from_the_folder_not_from_job_json(home, fake_edh):
+    d = runner.create_job(_spec(fake_edh, home / "out"))
+    meta = json.loads((d / "job.json").read_text())
+    meta["id"] = "../../.."
+    (d / "job.json").write_text(json.dumps(meta))
+    assert runner.status(d)["id"] == d.name
+    assert engine.Engine(d).job_id == d.name
+
+
+def test_deleting_outputs_removes_only_stores(home, fake_edh):
+    s = _spec(fake_edh, home / "out")
+    d = runner.create_job(s)
+    meta = json.loads((d / "job.json").read_text())
+    meta["spec"]["output"]["directory"] = str(home)  # a group member points it elsewhere
+    meta["spec"]["output"]["name"] = "precious"
+    (d / "job.json").write_text(json.dumps(meta))
+    for n in ("precious.zarr", "precious.icechunk"):
+        (home / n).mkdir()
+        (home / n / "thesis.tex").write_text("x")
+    runner.delete(d, outputs=True)
+    assert (home / "precious.zarr" / "thesis.tex").exists() and (home / "precious.icechunk" / "thesis.tex").exists()
