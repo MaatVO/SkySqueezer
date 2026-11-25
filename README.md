@@ -57,6 +57,7 @@ Choose the source first; the catalogue, the API key and the download strategy fo
 - Discover variables and pressure levels from live metadata (STAC and Zarr for Earth Data Hub, the dataset forms and constraints for the CDS).
 - ERA5 single and pressure levels, ERA5-Land, CERRA, CARRA, daily and monthly statistics, projections and other derived products.
 - Inspect available temporal and spatial coordinates before downloading.
+- Combine several Earth Data Hub datasets into one store. In **Dataset**, add more datasets under *Combine with other datasets*; only datasets with the same projection, domain and resolution are accepted. **Variables** lists all their variables in one table with a *Dataset* column. In **Time**, a common period and time step sit on top, and each dataset has its own block: its period (the common one by default) and its statistics. A warning appears when the period reaches beyond a dataset's data; those steps stay empty (NaN) in the store. A variable present in two datasets gets the dataset's name as a suffix (`z_pressure_levels`). In a job file, list the datasets under `"parts"`.
 
 ### 📅 Flexible temporal selection
 

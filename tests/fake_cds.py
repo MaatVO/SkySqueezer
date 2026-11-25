@@ -225,6 +225,7 @@ class FakeCDS:
             self.run_delay = 0.05  # seconds running before done
             self.max_active = 100  # queued + running jobs per user
             self.throttle_mode = "http"  # over max_active: "http" (429 on submit) or "job" (job fails)
+            self.throttle_text = THROTTLE_TEXT  # what the CDS says when it refuses more queued requests
             self.fail_requests: set[str] = set()  # canonical requests whose jobs fail
             self.expire_results = False
             self.truncate_next_download = False
@@ -376,7 +377,7 @@ class FakeCDS:
                 elif self.active() >= self.max_active:
                     if self.throttle_mode == "http":
                         raise web.HTTPTooManyRequests(text=json.dumps({"title": "too many requests",
-                                                                       "detail": THROTTLE_TEXT}))
+                                                                       "detail": self.throttle_text}))
                     status = "throttled"
                 else:
                     status = "accepted"
@@ -384,7 +385,7 @@ class FakeCDS:
                 jid = str(uuid.uuid4())
                 j = {"id": jid, "dataset": req.match_info["id"], "inputs": inputs, "canon": canon,
                      "t": time.monotonic(), "created": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), "status": "accepted",
-                     "fail": THROTTLE_TEXT if status == "throttled" else
+                     "fail": self.throttle_text if status == "throttled" else
                      ("MARS returned no data" if canon in self.fail_requests else None)}
                 if status == "successful":
                     j["status"] = "successful"

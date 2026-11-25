@@ -31,7 +31,7 @@ from . import catalog, keys, quota, sources, store
 from .aggregate import bitround, reduce_periods
 from .http import EDHClient, Fatal, QuotaReached, RequestCounter
 from .job import JobSpec
-from .planner import Plan, Unit, VarPlan
+from .planner import Plan, Unit, VarPlan, combined_summary
 from .util import human_bytes, read_json, write_json_atomic
 
 MAX_CONNECTIONS = 64
@@ -128,6 +128,13 @@ class Engine:
     def control(self) -> dict:
         return read_json(self.dir / "control.json", {}, dict)
 
+    def control_stop(self) -> None:
+        """A pause or cancel asked through control.json. A worker of another account (shared jobs folder)
+        cannot be signalled, so this is how it learns that it should stop."""
+        action = self.control().get("action")
+        if action in ("pause", "cancel"):
+            self.request_stop(action)
+
     def request_stop(self, reason: str):
         if not self.stop_event.is_set():
             self.stop_reason = reason
@@ -151,6 +158,8 @@ class Engine:
             limit = int(key.quota * spec.download.quota_safety)
             self.counter = RequestCounter(key.fingerprint, limit=limit)
             self.key = key
+            if spec.combined:
+                return self._run_parts()
             info = catalog.dataset_info(spec)
             url = info["url"]
             ds = catalog.load_dataset(url, key.secret, counter=self.counter, info=info)
@@ -184,6 +193,57 @@ class Engine:
             if hasattr(self, "counter"):
                 self.counter.flush()
 
+    def _run_parts(self) -> str:
+        """A combined job: every part (dataset) in turn into the same repository, then one export.
+
+        All parts are planned first and must agree on time axis and grid, so nothing is downloaded for a
+        combination that cannot be stored. ``units_done`` holds job-wide unit numbers (part ``i`` starts at the
+        sum of the earlier parts' units), so the progress and a resume work as for one dataset."""
+        spec = self.spec
+        plans = []
+        for i in range(len(spec.parts)):
+            ps = spec.part_spec(i)
+            info = catalog.dataset_info(ps)
+            ds = catalog.load_dataset(info["url"], self.key.secret, counter=self.counter, info=info)
+            plans.append(Plan(ps, ds))
+        why = store.parts_compatible(plans)
+        if why:
+            raise Fatal(f"cannot combine these datasets: {why}")
+        self.plans = plans
+        bases = [sum(len(p.units) for p in plans[:i]) for i in range(len(plans))]
+        total = sum(len(p.units) for p in plans)
+        for i, p in enumerate(plans):
+            for w in p.warnings:
+                self.log.warning(f"{p.spec.dataset}: {w}")
+            s = p.summary()
+            self.log.info(f"plan part {i + 1}/{len(plans)} {p.spec.dataset}: {s['requests']} requests, "
+                          f"~{human_bytes(s['download_bytes_est'])} to download, {len(p.units)} units, "
+                          f"outputs {s['outputs']}, space {s['space']}")
+        self.save_state(units_total=total, plan=combined_summary(plans), parts_total=len(plans),
+                        requests_total=sum(p.n_requests for p in plans),
+                        connections=self.control().get("connections", spec.download.connections))
+        self.plan = plans[0]
+        self._open_repo()
+        extend = spec.output.target_mode == "extend"
+        for i, p in enumerate(plans):
+            self.part, self.plan, self.unit_base = i, p, bases[i]
+            if i and not extend:
+                store.add_part(self.repo, p, self.job_id, i)
+            done = {u for u in self.state["units_done"] if bases[i] <= u < bases[i] + len(p.units)}
+            if len(done) < len(p.units):
+                self.log.info(f"part {i + 1}/{len(plans)}: {p.spec.dataset} ({', '.join(spec.parts[i].variables)})")
+                self.save_state(status="running", part=i, part_dataset=p.spec.dataset)
+                asyncio.run(self._pipeline())
+            if self.errors:
+                raise Fatal("; ".join(self.errors[:3]))
+            if self.stop_event.is_set() and len(set(self.state["units_done"])) < total:
+                status = {"cancel": "cancelled", "quota": "paused_quota"}.get(self.stop_reason, "paused")
+                self.log.info(f"stopped ({status}); {len(self.state['units_done'])}/{total} units done")
+                self.save_state(status=status, pid=None, message=f"stopped: {self.stop_reason}")
+                return status
+        self._finish()
+        return "completed"
+
     def _open_repo(self):
         path = self.spec.icechunk_path
         if self.spec.output.target_mode == "extend":
@@ -194,10 +254,11 @@ class Engine:
             self.log.info(f"extending {direction} into Icechunk repository {path}")
             done = store.extension_done(repo, self.job_id)  # committed with the resize: never extend twice
             if done is None:
-                problem = store.check_extension(repo, self.plan, direction)
+                plans = getattr(self, "plans", None) or self.plan
+                problem = store.check_extension(repo, plans, direction)
                 if problem:
                     raise Fatal(f"cannot extend {path.name}: {problem}")
-                done = store.extend_repo(repo, self.plan, direction, self.job_id)
+                done = store.extend_repo(repo, plans, direction, self.job_id)
             self.time_offset = done["offset"]
             self.save_state(time_offset=self.time_offset, extend_direction=direction)
             self.repo = repo
@@ -222,8 +283,12 @@ class Engine:
         plan, spec = self.plan, self.spec
         extra = {"edh_requests": self.state["requests_job"], "edh_bytes_downloaded": self.state["bytes_job"],
                  "edh_completed": now_iso()}
+        plans = getattr(self, "plans", None)
         if spec.output.target_mode == "extend":
             store.update_extended_attrs(self.repo, plan, self.job_id, extra)
+        elif plans:
+            extra = {**store.combined_attrs(plans, spec), **extra}
+            store.set_attrs(self.repo, store.root_attrs(plans[0], self.job_id, "complete", extra), "job complete")
         else:
             store.set_attrs(self.repo, store.root_attrs(plan, self.job_id, "complete", extra), "job complete")
         if spec.output.export_zarr:
@@ -231,7 +296,7 @@ class Engine:
             self.activity(force=True, stage="exporting", unit=None, downloads=None,
                           export={"done": 0, "total": None, "path": str(spec.zarr_path), "since": now_iso()})
             self.log.info(f"exporting to {spec.zarr_path}")
-            n = store.export_zarr(self.repo, spec.zarr_path, consolidated=spec.output.consolidated, plan=plan,
+            n = store.export_zarr(self.repo, spec.zarr_path, consolidated=spec.output.consolidated, plan=plans or plan,
                                   memory_gb=spec.download.memory_gb,
                                   progress=lambda d, t: self.activity(
                                       export={"done": d, "total": t, "path": str(spec.zarr_path),
@@ -261,7 +326,9 @@ class Engine:
 
     # ---------------------------------------------------------------- spool
     def spool_dir(self) -> Path:
-        return self.spec.spool_path(self.job_id, self.dir)
+        base = self.spec.spool_path(self.job_id, self.dir)
+        # combined jobs: one folder per part (two datasets can both have a ``z``)
+        return base / f"part{self.part}" if self.spec.combined else base
 
     def chunk_path(self, c) -> Path:
         var, _, t, li, ty, tx = c
@@ -319,7 +386,8 @@ class Engine:
         loop = asyncio.get_running_loop()
         spool = self.spool_dir()
         spool.mkdir(parents=True, exist_ok=True)
-        done = set(self.state["units_done"])
+        base = getattr(self, "unit_base", 0)  # combined jobs: where this part's units start job-wide
+        done = {i - base for i in self.state["units_done"] if base <= i < base + len(plan.units)}
         todo = [u for u in plan.units if u.index not in done]
         lock = threading.Lock()
         need: dict[tuple, list[int]] = {}
@@ -371,10 +439,10 @@ class Engine:
                                 if q.exists():
                                     q.unlink()
                     with self._state_lock:
-                        self.state["units_done"].append(u.index)
+                        self.state["units_done"].append(base + u.index)
                     processed["n"] += 1
                     self.save_state()
-                    self.log.info(f"unit {u.index + 1}/{len(plan.units)} committed ({self._unit_label(u)}) "
+                    self.log.info(self._part_prefix() + f"unit {u.index + 1}/{len(plan.units)} committed ({self._unit_label(u)}) "
                                   f"in {time.time() - t0:.1f}s")
             except Exception as e:
                 self.log.exception(f"processing failed: {e}")
@@ -502,6 +570,7 @@ class Engine:
             self.save_state(status="waiting_quota", message=f"waiting for quota reset {reset:%Y-%m-%d %H:%M} UTC")
             while datetime.now(timezone.utc) < reset + _grace() and not self.stop_event.is_set():
                 await asyncio.sleep(5)
+                self.control_stop()  # e.g. a colleague takes the job over with their key
             if self.stop_event.is_set():
                 return
             self.counter.flush()
@@ -511,8 +580,12 @@ class Engine:
             quota_ok.set()
 
         async def watch_stop():
+            n = 0
             while not self.stop_event.is_set() and not stop_async.is_set():
                 await asyncio.sleep(0.5)
+                n += 1
+                if n % 4 == 0:
+                    self.control_stop()
             stop_async.set()
 
         client = EDHClient(self.key.secret, counter=self.counter, connections=MAX_CONNECTIONS)
@@ -552,8 +625,13 @@ class Engine:
             requests_run=stats["req"], requests_left=left, bytes_run=stats["bytes"],
             spool_bytes=self._spool_bytes, month_used=self.counter.month_used, month_limit=self.counter.limit,
             units_processed=processed["n"],
-            message=f"{processed['n']}/{len(self.plan.units)} units committed",
+            message=self._part_prefix() + f"{processed['n']}/{len(self.plan.units)} units committed",
         )
+
+    def _part_prefix(self) -> str:
+        if not self.spec.combined:
+            return ""
+        return f"{self.plan.spec.dataset} ({self.part + 1}/{len(self.spec.parts)}): "
 
     def _unit_label(self, u: Unit) -> str:
         if u.static or not self.plan.n_periods:
@@ -576,7 +654,7 @@ class Engine:
                 continue
             for li in (vp.level_idx or [None]):
                 lpos = () if li is None else (plan.level_pos[li],)
-                offset = getattr(self, "time_offset", 0)
+                offset = getattr(self, "time_offset", 0) + plan.axis_offset  # combined: the part's place
                 tsl = () if static else (slice(offset + u.k0, offset + u.k1),)
                 if plan.points is not None:
                     arr = self._assemble_points(u, vp, li)

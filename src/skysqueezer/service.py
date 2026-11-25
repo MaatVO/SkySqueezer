@@ -7,15 +7,16 @@ run on your computer while the work and the files stay on the server.
 
 import asyncio
 import math
+import os
 import platform
 import threading
 from pathlib import Path
 
-from . import __version__, catalog, chunking, keys, quota, runner, sample, sources, store
+from . import __version__, catalog, chunking, keys, projection, quota, runner, sample, sources, store
 from .gui import structure
 from .http import RequestCounter
-from .job import JobSpec
-from .planner import Plan, PlanError
+from .job import JobSpec, resolve_names
+from .planner import Plan, PlanError, combined_summary
 
 _DATASETS: dict[str, catalog.Dataset] = {}
 _STORE_CACHE: dict = {}
@@ -132,7 +133,10 @@ def cds_describe(dataset: str, key: str | None = None, refresh: bool = False) ->
     from .sources.cds import catalog as cds_catalog
     from .sources.cds.client import CDSClient
 
+    from .sources.cds.output import dataset_projection
+
     d = cds_catalog.describe(dataset, refresh)
+    d["projection"] = dataset_projection(dataset)
     d["licences_missing"] = None
     k = _key(key, sources.CDS)
     if k is not None and d["licences"]:
@@ -175,8 +179,82 @@ def dataset_load(info: dict, key: str, refresh: bool = False) -> dict:
             _DATASETS[url] = ds
     return {"summary": ds.summary(),
             "variables": [{"name": v.name, "long_name": v.long_name, "units": v.units, "kind": v.kind,
-                           "default_stat": v.default_stat()} for v in ds.variables.values() if v.kind != "unsupported"],
-            "levels": None if ds.levels is None else ds.levels.tolist()}
+                           "default_stat": v.default_stat(), **_grib(v.attrs)}
+                          for v in ds.variables.values() if v.kind != "unsupported"],
+            "levels": None if ds.levels is None else ds.levels.tolist(),
+            "projection": projection.latlon(projection.regional_extent(ds.lat, ds.lon))}
+
+
+def _combined(s: JobSpec) -> JobSpec:
+    """Check and tidy a combined job (several datasets into one store), in place: parts without variables are
+    dropped, two parts of the same dataset become one, clashing output names get the dataset's tag, and the
+    job's own dataset fields mirror the first part. A single remaining part makes it a plain job."""
+    if not s.parts:
+        return s
+    if s.source != sources.EDH:
+        raise ValueError("combining datasets into one store is available for Earth Data Hub datasets only")
+    merged: dict[tuple, object] = {}
+    for p in s.parts:
+        if not p.variables:
+            continue
+        k = (p.collection, p.dataset)
+        if k in merged:
+            m = merged[k]
+            m.variables += [v for v in p.variables if v not in m.variables]
+            m.stats.update(p.stats)
+            m.rename.update(p.rename)
+            if m.levels is not None and p.levels is not None:
+                m.levels = sorted({*m.levels, *p.levels}, reverse=True)
+            else:
+                m.levels = None
+        else:
+            merged[k] = p
+    parts = resolve_names(list(merged.values()))
+    if not parts:
+        raise PlanError("select at least one variable")
+    s.parts = parts
+    first = s.part_spec(0)
+    s.dataset, s.collection, s.dataset_url = first.dataset, first.collection, first.dataset_url
+    s.variables, s.levels, s.rename = first.variables, first.levels, first.rename
+    if len(parts) == 1:  # a plain job, with the dataset's own period and statistics
+        s.time, s.parts = first.time, []
+    return s
+
+
+def _part_plans(s: JobSpec) -> list[Plan]:
+    """The plan of every part of a combined job; datasets not described yet are loaded (cached on disk)."""
+    plans = []
+    for i in range(len(s.parts)):
+        ps = s.part_spec(i)
+        with _LOCK:
+            ds = _DATASETS.get(ps.dataset_url or "")
+        if ds is None:
+            info = catalog.dataset_info(ps)
+            k = keys.get_key(s.download.key)
+            ds = catalog.load_dataset(info["url"], k.secret, counter=RequestCounter(k.fingerprint), info=info)
+            with _LOCK:
+                _DATASETS[info["url"]] = ds
+            s.parts[i].dataset_url = info["url"]
+        plans.append(Plan(ps, ds))
+    return plans
+
+
+def _grib(a: dict) -> dict:
+    """What a variable's GRIB attributes say about it (for the variable's info pop-up)."""
+    std = a.get("standard_name")
+    return {"param_id": a.get("GRIB_paramId"), "short_name": a.get("GRIB_shortName"),
+            "standard_name": std if std and std != "unknown" else None,
+            "step_type": a.get("GRIB_stepType"), "level_type": a.get("GRIB_typeOfLevel")}
+
+
+def param_info(param_id: int) -> dict:
+    """A GRIB parameter from the ECMWF Parameter Database (public, cached): name, units, description."""
+    from . import params
+
+    try:
+        return {"ok": True, **params.info(int(param_id))}
+    except Exception as e:  # noqa: BLE001 - the pop-up says it could not be read
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "url": params.PAGE.format(id=int(param_id))}
 
 
 def _plan(spec: dict) -> Plan:
@@ -292,10 +370,80 @@ def _cds_layout(p, follow: bool) -> dict:
             "shards": _shards(out), "struct": struct}
 
 
+def _merge_struct(structs: list[dict]) -> dict:
+    """One store description for the parts of a combined job: shared coordinates once, every part's variables."""
+    out = dict(structs[0])
+    names = {c["name"] for c in out["coords"]}
+    out["coords"] = list(out["coords"]) + [c for d in structs[1:] for c in d["coords"] if c["name"] not in names]
+    out["data"] = [x for d in structs for x in d["data"]]
+    for k in ("raw", "disk", "files"):
+        out[k] = sum(d[k] for d in structs)
+    return out
+
+
+def _merge_est(ests: list[dict]) -> dict:
+    out = dict(ests[0])
+    for k in ("download", "raw", "zarr"):
+        out[k] = sum(e[k] for e in ests)
+    for k in ("download_measured", "zarr_measured"):
+        out[k] = all(e[k] for e in ests)
+    out["ratios"] = {n: r for e in ests for n, r in e["ratios"].items()}
+    out["eta_s"] = sum(e["eta_s"] for e in ests) if all(e["eta_s"] for e in ests) else None
+    return out
+
+
+def _combined_plan(spec: dict, connections: int, follow: bool) -> dict:
+    try:
+        s = _combined(JobSpec.from_dict(spec))
+        if not s.parts:
+            return plan(s.to_dict(), connections, follow)
+        plans = _part_plans(s)
+    except (PlanError, ValueError, KeyError) as e:
+        return {"ok": False, "error": str(e.args[0] if isinstance(e, KeyError) and e.args else e)}
+    why = store.parts_compatible(plans)
+    if why:
+        return {"ok": False, "error": f"these datasets cannot share one store: {why}"}
+    rec = chunking.recommend(plans[0])
+    if follow:
+        for p in plans:
+            p.spec.output.chunk_layout = rec[0]
+    ests, structs = [], []
+    for p in plans:
+        smp = sample.last_result(p.ds.url)
+        smp = smp if smp and smp.get("dataset") == p.ds.url else None
+        e = sample.estimate(p, smp, connections, chunking.compression_ratio(p))
+        ests.append(e)
+        structs.append(structure.describe(p, chunking.compression_ratio(p), e.get("ratios")))
+    p0, o = plans[0], plans[0].spec.output
+    smp0 = sample.last_result(p0.ds.url)
+    smp0 = smp0 if smp0 and smp0.get("dataset") == p0.ds.url else None
+    k = _key(s.download.key)
+    n_requests = sum(p.n_requests for p in plans)
+    return {"ok": True, "summary": combined_summary(plans), "rec": list(rec), "layout": o.chunk_layout,
+            "rows": chunking.analyze(p0), "est": _merge_est(ests), "shards": _shards(p0),
+            "struct": _merge_struct(structs),
+            "paths": {"zarr": str(s.zarr_path) if o.export_zarr else None,
+                      "icechunk": str(s.icechunk_path) if o.keep_icechunk else None},
+            "n_requests": n_requests, "sample": smp0,
+            "sample_n": min(sample.DEFAULT_REQUESTS, n_requests),
+            "sample_requests": sample.DEFAULT_REQUESTS,
+            "key": _key_row(k) if k else None,
+            "parts": [{"dataset": p.spec.dataset, "variables": list(p.spec.variables),
+                       "rename": dict(p.spec.rename), "requests": p.n_requests,
+                       "outputs": [n for vp in p.vars for n in vp.out_names],
+                       "first": str(p.labels[0]) if p.n_periods else None,
+                       "last": str(p.labels[-1]) if p.n_periods else None} for p in plans]}
+
+
 def plan(spec: dict, connections: int, follow: bool) -> dict:
     """Everything the form shows about a spec: summary, chunk layouts, size estimates, dataset structure."""
     if spec.get("source") == sources.CDS:
+        if spec.get("parts"):
+            return {"ok": False, "error": "combining datasets into one store is available for Earth Data Hub "
+                                          "datasets only"}
         return cds_plan(spec, follow)
+    if spec.get("parts"):
+        return _combined_plan(spec, connections, follow)
     try:
         p = _plan(spec)
     except (PlanError, ValueError) as e:
@@ -322,11 +470,23 @@ def plan(spec: dict, connections: int, follow: bool) -> dict:
 
 
 def sample_run(spec: dict, key: str, n: int, emit=None) -> dict:
-    p = _plan(spec)
+    """Download ``n`` of the job's own chunks. A combined job shares them out over its datasets, each sampled
+    with its own plan (each dataset keeps its own sample)."""
+    s = JobSpec.from_dict(spec)
+    if s.parts:
+        _combined(s)  # in place; a single remaining part makes it a plain job
+    plans = _part_plans(s) if s.parts else [_plan(s.to_dict())]
     k = keys.get_key(key)
-    prog = (lambda i, t: emit({"i": i, "total": t})) if emit else None
-    asyncio.run(sample.run(p, k.secret, RequestCounter(k.fingerprint), n=n, progress=prog))
-    return {"n": n}
+    counter = RequestCounter(k.fingerprint)
+    shares = [n // len(plans) + (i < n % len(plans)) for i in range(len(plans))]
+    done = 0
+    for p, m in zip(plans, shares):
+        if m < 1:
+            continue
+        prog = (lambda i, t, base=done: emit({"i": base + i, "total": n})) if emit else None
+        asyncio.run(sample.run(p, k.secret, counter, n=m, progress=prog))
+        done += m
+    return {"n": done}
 
 
 # ------------------------------------------------------------------ jobs and stores
@@ -338,6 +498,12 @@ def job_start(spec: dict) -> dict:
         keys.get_key(s.download.key, src.id)
     except KeyError as e:
         raise ValueError(e.args[0] if e.args else f"add a {src.title} API key first") from None
+    if s.parts:  # several datasets into one store: all must fit before anything is downloaded
+        _combined(s)
+        if s.parts:
+            why = store.parts_compatible(_part_plans(s))
+            if why:
+                raise ValueError(f"these datasets cannot share one store: {why}")
     name = s.output.name
     if (not name.strip() or name != name.strip() or name in (".", "..") or "/" in name or "\\" in name
             or "\0" in name):
@@ -379,13 +545,111 @@ def job_start(spec: dict) -> dict:
 
 def jobs_list() -> list[dict]:
     out = runner.list_jobs()
+    me = runner.whoami()
+    with _LOCK:
+        takeovers = {k: dict(v) for k, v in _TAKEOVERS.items()}
     for j in out:
         j["outputs_exist"] = [o for o in j.get("outputs") or [] if Path(o).exists()]
+        j["mine"] = (j.get("run_by") or j.get("created_by") or me) == me
+        if j["id"] in takeovers:
+            j["takeover"] = takeovers[j["id"]]
     return out
 
 
-def job_resume(jid: str) -> dict:
-    return {"pid": runner.launch(runner.resolve(jid))}
+def jobs_folder() -> dict:
+    """Where jobs are kept, and whether the folder is shared with other accounts."""
+    from .paths import jobs_dir, shared_jobs_dir
+
+    return {"path": str(jobs_dir()), "shared": shared_jobs_dir() is not None, "user": runner.whoami()}
+
+
+def _resume_key(spec: dict, key: str | None) -> keys.ApiKey:
+    """The key a resume runs with: the one asked for, else the job's own (when this account has it), else this
+    account's default. In a shared jobs folder the job may have been started by a colleague, whose key names
+    mean nothing here."""
+    src = sources.require_jobs(spec.get("source") or sources.EDH)
+    if key:
+        try:
+            return keys.get_key(key, src.id)
+        except KeyError as e:
+            raise ValueError(e.args[0] if e.args else f"no {src.title} key {key!r}") from None
+    try:
+        return keys.get_key((spec.get("download") or {}).get("key"), src.id)
+    except KeyError:
+        try:
+            return keys.get_key(None, src.id)
+        except KeyError as e:
+            raise ValueError(e.args[0] if e.args else f"add a {src.title} API key first") from None
+
+
+def _set_job_key(d: Path, k: keys.ApiKey) -> None:
+    """Record the key (by name; never the secret) the next run uses, and who resumed with it."""
+    from datetime import datetime
+
+    from .util import read_json, write_json_atomic
+
+    meta = read_json(d / "job.json", None, dict)
+    if not meta or not isinstance(meta.get("spec"), dict):
+        raise ValueError(f"job {d.name}: job.json is missing or damaged")
+    meta["spec"].setdefault("download", {})["key"] = k.name
+    runs = meta.get("runs") if isinstance(meta.get("runs"), list) else []
+    runs.append({"by": runner.whoami(), "key": k.name, "at": datetime.now().isoformat(timespec="seconds")})
+    meta["runs"] = runs[-50:]
+    write_json_atomic(d / "job.json", meta)
+
+
+def job_resume(jid: str, key: str | None = None) -> dict:
+    """Start a stopped job again, with ``key`` (a name in this account) or the job's own key when this account
+    has it, else this account's default key."""
+    d = runner.resolve(jid)
+    st = runner.status(d)
+    if st.get("alive"):
+        raise ValueError(f"job {d.name} is running" + (f" (by {st['run_by']})" if st.get("run_by") else "")
+                         + ": take it over to continue it with your key")
+    k = _resume_key(st.get("spec") or {}, key)
+    _set_job_key(d, k)
+    return {"pid": runner.launch(d), "key": k.name}
+
+
+_TAKEOVERS: dict[str, dict] = {}  # job id -> {"key", "since", "error"}: running jobs this agent waits to resume
+TAKEOVER_WAIT = 30 * 60  # seconds: a pause waits for the unit being processed, which can take a while
+
+
+def job_takeover(jid: str, key: str | None = None) -> dict:
+    """Continue a running job (e.g. one waiting for its key's quota) with ``key``: ask its worker to pause, then
+    resume it here as soon as it has stopped. The worker may belong to another account: it reads the pause from
+    control.json. The resume happens in this agent, so it needs the app to stay open until then."""
+    import time
+
+    d = runner.resolve(jid)
+    st = runner.status(d)
+    k = _resume_key(st.get("spec") or {}, key)
+    if not st.get("alive"):
+        return {**job_resume(jid, k.name), "waited": False}
+    with _LOCK:
+        if d.name in _TAKEOVERS and not _TAKEOVERS[d.name].get("error"):
+            return {"waiting": True}
+        _TAKEOVERS[d.name] = {"key": k.name, "since": time.time(), "error": None}
+    runner.stop(d, "pause")
+
+    def wait():
+        t0 = time.time()
+        while time.time() - t0 < TAKEOVER_WAIT:
+            time.sleep(2)
+            if not runner.status(d).get("alive"):
+                break
+        try:
+            if runner.status(d).get("alive"):
+                raise RuntimeError("the job did not stop within 30 minutes")
+            job_resume(d.name, k.name)
+            with _LOCK:
+                _TAKEOVERS.pop(d.name, None)
+        except Exception as e:  # noqa: BLE001 - the job card shows it
+            with _LOCK:
+                _TAKEOVERS[d.name] = {**_TAKEOVERS.get(d.name, {}), "error": f"{type(e).__name__}: {e}"}
+
+    threading.Thread(target=wait, daemon=True, name=f"takeover-{d.name}").start()
+    return {"waiting": True}
 
 
 def job_stop(jid: str, action: str) -> dict:
@@ -486,7 +750,120 @@ def list_dirs(path: str = "") -> dict:
             "truncated": len(names) > 500, "home": str(Path.home()), "recent": recent[:5]}
 
 
+def jobs_folder_set(path: str | None) -> dict:
+    """Use ``path`` as this account's jobs folder (a folder shared with colleagues), or the private default when
+    empty. Saved in this account's config.json; the server-wide /etc/sks-dl/config.json is the admin's."""
+    from .paths import user_config
+    from .util import read_json, write_json_atomic
+
+    cfg = read_json(user_config(), {}, dict)
+    path = (path or "").strip()
+    if path:
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            raise ValueError("give an absolute path, e.g. /srv/sks-dl/jobs")
+        p.mkdir(parents=True, exist_ok=True)
+        if not os.access(p, os.W_OK):
+            raise ValueError(f"{p} is not writable for {runner.whoami()}")
+        cfg["jobs_dir"] = str(p)
+    else:
+        cfg.pop("jobs_dir", None)
+    write_json_atomic(user_config(), cfg)
+    from .paths import share_files
+
+    share_files()
+    return jobs_folder()
+
+
+NETWORK_FS = {"cifs", "smb3", "smbfs", "nfs", "nfs4", "fuse.sshfs", "fuse.rclone", "9p", "afpfs", "davfs",
+              "fuse.gvfsd-fuse"}
+
+
+def _mount_of(p: Path) -> dict:
+    """The mount holding ``p`` (longest mount point that contains it), from /proc/mounts."""
+    best = {"point": "/", "fs": "", "source": ""}
+    try:
+        lines = Path("/proc/mounts").read_text().splitlines()
+    except OSError:
+        return best
+    rp = str(p.resolve())
+    for line in lines:
+        f = line.split()
+        if len(f) < 3:
+            continue
+        point = f[1].replace("\\040", " ")
+        if (rp == point or rp.startswith(point.rstrip("/") + "/")) and len(point) >= len(best["point"]):
+            best = {"point": point, "fs": f[2], "source": f[0]}
+    return best
+
+
+def folder_check(path: str) -> dict:
+    """Can jobs write their output (and temporary chunks) to ``path``? Writes, reads back and deletes a tiny
+    Icechunk repository there, so a network folder (an SMB or NFS mount of a NAS) is tried for real. Also says
+    the free space, the filesystem, and whether colleagues could write there (shared jobs)."""
+    import shutil as sh
+    import tempfile
+    import time
+
+    import icechunk as ic
+    import numpy as np
+    import zarr
+
+    p = Path(path).expanduser()
+    out = {"path": str(p), "ok": False, "checks": []}
+
+    def check(name, ok, detail=""):
+        out["checks"].append({"name": name, "ok": bool(ok), "detail": detail})
+        return ok
+
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        check("folder", False, f"cannot create it: {e.strerror or e}")
+        return out
+    m = _mount_of(p)
+    out["fs"], out["mount"], out["source"] = m["fs"], m["point"], m["source"]
+    out["network"] = m["fs"] in NETWORK_FS or m["fs"].startswith("fuse.")
+    try:
+        u = sh.disk_usage(p)
+        out["free_gb"], out["total_gb"] = u.free / 1e9, u.total / 1e9
+        check("free space", u.free > 1e9, f"{u.free / 1e9:,.0f} GB free of {u.total / 1e9:,.0f} GB")
+    except OSError as e:
+        check("free space", False, str(e))
+    if not check("writable", os.access(p, os.W_OK | os.X_OK), "" if os.access(p, os.W_OK) else
+                 f"{runner.whoami()} cannot write here"):
+        return out
+    t0 = time.time()
+    tmp = Path(tempfile.mkdtemp(prefix=".sks-check-", dir=p))
+    try:
+        repo = ic.Repository.create(ic.local_filesystem_storage(str(tmp / "t.icechunk")))
+        ses = repo.writable_session("main")
+        g = zarr.open_group(ses.store, mode="w", zarr_format=3)
+        a = g.create_array("x", shape=(64, 64), chunks=(32, 32), dtype="float32")
+        a[:] = np.arange(64 * 64, dtype="float32").reshape(64, 64)
+        ses.commit("check")
+        repo2 = ic.Repository.open(ic.local_filesystem_storage(str(tmp / "t.icechunk")))
+        back = zarr.open_group(repo2.readonly_session("main").store, mode="r")["x"][:]
+        ok = bool(np.array_equal(back, np.arange(64 * 64, dtype="float32").reshape(64, 64)))
+        check("Icechunk write, commit and read back", ok, f"{time.time() - t0:.1f} s")
+    except Exception as e:  # noqa: BLE001 - shown in the UI
+        check("Icechunk write, commit and read back", False, f"{type(e).__name__}: {e}")
+    finally:
+        sh.rmtree(tmp, ignore_errors=True)
+    from .paths import shared_jobs_dir
+
+    if shared_jobs_dir():
+        st = p.stat()
+        group_ok = bool(st.st_mode & 0o020)
+        check("colleagues can write (shared jobs)", group_ok,
+              "group-writable" if group_ok else "not group-writable: a colleague could not resume jobs writing "
+              "here (for an SMB mount: file_mode=0660,dir_mode=2770 and the group in gid=)")
+    out["ok"] = all(c["ok"] for c in out["checks"])
+    return out
+
+
 METHODS = {f.__name__: f for f in (
     hello, sources_list, keys_list, key_status, key_add, key_test, key_remove, key_default, key_set_quota, key_calibrate,
     collections, datasets, cds_describe, cds_check, cds_options, cds_plan, dataset_load, plan, sample_run, job_start, jobs_list, job_resume, job_stop,
-    job_connections, job_inflight, job_requests, job_delete, job_log, store_structure, store_inspect, list_dirs)}
+    job_connections, job_inflight, job_requests, job_delete, job_log, store_structure, store_inspect, list_dirs,
+    param_info, job_takeover, jobs_folder, jobs_folder_set, folder_check)}

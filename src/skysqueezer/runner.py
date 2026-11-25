@@ -6,6 +6,7 @@ Each job lives in ``<data>/jobs/<id>/`` with ``job.json`` (spec), ``state.json``
 """
 
 import fcntl
+import getpass
 import os
 import re
 from contextlib import contextmanager
@@ -30,7 +31,7 @@ START_GRACE = 30  # seconds a just-launched worker counts as alive before its pr
 def file_lock(path: Path):
     """Exclusive lock between threads and processes (released when the holder dies)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o666)  # umask applies (group-writable when shared)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         yield
@@ -40,7 +41,7 @@ def file_lock(path: Path):
 
 def hold_run_lock(job_dir: Path) -> int | None:
     """Taken by the worker for its whole life: a second worker of the same job cannot start. None if held."""
-    fd = os.open(Path(job_dir) / "run.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    fd = os.open(Path(job_dir) / "run.lock", os.O_RDWR | os.O_CREAT, 0o666)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -67,8 +68,28 @@ def _slug(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", s).strip("-")[:40] or "job"
 
 
+def whoami() -> str:
+    try:
+        return getpass.getuser()
+    except Exception:  # noqa: BLE001 - no name for this uid
+        return str(os.getuid())
+
+
+def absolute_paths(spec: JobSpec) -> JobSpec:
+    """Folders as absolute paths, in place: ``~`` in a shared job would be the home of whoever resumes it."""
+    o, dl = spec.output, spec.download
+    o.directory = str(Path(o.directory).expanduser().absolute())
+    if o.target_store:
+        o.target_store = str(Path(o.target_store).expanduser().absolute())
+    if dl.spool_dir:
+        dl.spool_dir = str(Path(dl.spool_dir).expanduser().absolute())
+    return spec
+
+
 def create_job(spec: JobSpec) -> Path:
     from . import __version__
+
+    absolute_paths(spec)
 
     jid = f"{datetime.now():%Y%m%d-%H%M%S}-{_slug(spec.output.name)}"
     d = jobs_dir() / jid
@@ -78,7 +99,7 @@ def create_job(spec: JobSpec) -> Path:
         d = jobs_dir() / f"{jid}-{n}"
     d.mkdir(parents=True)
     write_json_atomic(d / "job.json", {"id": d.name, "created": datetime.now().isoformat(timespec="seconds"),
-                                       "app_version": __version__, "spec": spec.to_dict()})
+                                       "app_version": __version__, "created_by": whoami(), "spec": spec.to_dict()})
     write_json_atomic(d / "state.json", {"status": "created", "units_done": []})
     write_json_atomic(d / "control.json", {"connections": spec.download.connections})
     return d
@@ -100,9 +121,7 @@ def resolve(job: str | Path) -> Path:
 def pid_alive(pid: int | None, job_dir: Path) -> bool:
     if not pid:
         return False
-    try:
-        os.kill(pid, 0)
-    except (ProcessLookupError, PermissionError):
+    if not _pid_exists(pid):
         return False
     try:
         cmd = Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="ignore")
@@ -112,12 +131,15 @@ def pid_alive(pid: int | None, job_dir: Path) -> bool:
 
 
 def _pid_exists(pid) -> bool:
+    """Whether a process exists; one of another account (a shared jobs folder) exists too."""
     if not pid:
         return False
     try:
         os.kill(pid, 0)
         return True
-    except (ProcessLookupError, PermissionError):
+    except PermissionError:
+        return True
+    except ProcessLookupError:
         return False
 
 
@@ -129,6 +151,7 @@ def status(job_dir: Path) -> dict:
     s["id"] = meta.get("id", job_dir.name)
     s["dir"] = str(job_dir)
     s["created"] = meta.get("created")
+    s["created_by"] = meta.get("created_by")
     s["spec"] = meta.get("spec") if isinstance(meta.get("spec"), dict) else {}
     if not s["spec"]:
         s["status"] = "unreadable"
@@ -186,7 +209,8 @@ def _launch(job_dir: Path) -> int:
     p = subprocess.Popen(_self_cmd() + ["_worker", str(job_dir)], stdin=subprocess.DEVNULL, stdout=out,
                          stderr=subprocess.STDOUT, start_new_session=True, close_fds=True, cwd=str(job_dir), env=env)
     write_json_atomic(job_dir / "state.json", {**read_json(job_dir / "state.json", {}, dict),
-                                               "status": "starting", "pid": p.pid, "launched_at": time.time()})
+                                               "status": "starting", "pid": p.pid, "launched_at": time.time(),
+                                               "run_by": whoami()})
     out.close()
     return p.pid
 
@@ -228,10 +252,20 @@ def stop(job_dir: Path, action: str = "pause", wait: float = 0) -> bool:
     set_control(job_dir, action=action)
     if not st["alive"]:
         if action == "cancel" and st.get("status") != "completed":
+            if (st.get("spec") or {}).get("source") == "cds" and (job_dir / "requests.json").exists():
+                from .sources.cds.engine import dismiss_waiting
+
+                try:  # no worker to do it: remove the requests still waiting on the CDS here
+                    dismiss_waiting(job_dir)
+                except Exception:  # noqa: BLE001  (an unreachable CDS must not block the cancel)
+                    pass
             write_json_atomic(job_dir / "state.json", {**read_json(job_dir / "state.json", {}, dict),
                                                        "status": "cancelled", "pid": None})
         return False
-    os.kill(st["pid"], signal.SIGTERM)
+    try:
+        os.kill(st["pid"], signal.SIGTERM)
+    except PermissionError:  # another account's worker: it reads the action from control.json within seconds
+        pass
     t = time.time()
     while wait and time.time() - t < wait and pid_alive(st["pid"], job_dir):
         time.sleep(0.5)

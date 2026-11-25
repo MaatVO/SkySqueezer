@@ -14,8 +14,8 @@ class TokenMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if path.startswith("/_nicegui/") and not path.startswith("/_nicegui/client"):
-            return await call_next(request)  # static assets
+        if (path.startswith("/_nicegui/") and not path.startswith("/_nicegui/client")) or path.startswith("/_sks/"):
+            return await call_next(request)  # static assets (/_sks/: the app's own, public data such as the basemap)
         # browsers share cookies between ports of one host: the laptop app and the servers it forwards are all
         # "localhost", so the cookie is named after the port the browser sees
         name = f"edh_token_{request.url.port or 80}"

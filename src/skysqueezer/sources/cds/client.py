@@ -32,7 +32,10 @@ log = logging.getLogger("edh.cds")
 
 FINAL = {"successful", "failed", "rejected", "dismissed"}
 # words CDS uses when it refuses more work from a user for a while (seen as job failures, or HTTP errors)
-THROTTLE_HINTS = ("temporarily limited", "too many", "rate limit", "try again later")
+THROTTLE_HINTS = ("temporarily limited", "too many", "rate limit", "try again later",
+                  # since 2026: "Maximum number queued requests for this dataset has been reached. Please configure
+                  # your scripts to request data sequentially" (a rejected job, per user and dataset)
+                  "maximum number queued requests", "request data sequentially")
 ORDERED_FIELDS = {"area", "grid", "location"}  # positional values: never sorted
 
 

@@ -1,10 +1,10 @@
 """Self-update of the packaged executable from the latest GitHub release.
 
-Every start of the app (``sks-dl`` / ``sks-dl app``) asks GitHub for the latest release, in the background while
-the app starts. If it is newer than this build, the app asks the user first (``AVAILABLE``; the pop-up is in
-gui/connect.py): only on a yes is the matching executable downloaded, checked against the release's ``.sha256``
-file and swapped in place of the running one, which carries on; the new version runs from the next start. "Skip this
-version" is remembered. Anything that goes wrong (offline, no permission to write next to the executable, unknown
+Each time the app is opened (every load of its page, ``check``) it asks GitHub for the latest release. If it is
+newer than this build, a pop-up (gui/connect.py) shows the start of its release notes and asks: only on a yes is
+the matching executable downloaded, checked against the release's ``.sha256`` file and swapped in place of the
+running one, which carries on; the new version runs from the next start. On a no it is asked again the next time
+the app is opened. Anything that goes wrong (offline, no permission to write next to the executable, unknown
 platform, ...) is reported and nothing changes.
 
 Only the packaged executable updates itself; running from source / ``uv tool install`` never does.
@@ -24,8 +24,7 @@ import urllib.request
 from pathlib import Path
 
 from . import __version__
-from .paths import config_dir, env
-from .util import read_json, write_json_atomic
+from .paths import env
 
 REPO = "MaatVO/SkySqueezer"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
@@ -57,7 +56,8 @@ def _get(url: str, timeout: float) -> bytes:
 
 
 def latest(timeout: float = 4.0) -> dict | None:
-    """{'version': '0.2.5', 'url': ..., 'sha_url': ...} for this platform, or None."""
+    """{'version': '0.2.5', 'url': ..., 'sha_url': ..., 'page': ..., 'notes': markdown} for this platform, or
+    None."""
     rel = json.loads(_get(API, timeout))
     if rel.get("draft") or rel.get("prerelease"):
         return None
@@ -66,7 +66,7 @@ def latest(timeout: float = 4.0) -> dict | None:
     for name, url in assets.items():
         if f"-{tag}" in name and not name.endswith(".sha256") and f"{name}.sha256" in assets:
             return {"version": rel["tag_name"].lstrip("v"), "url": url, "sha_url": assets[f"{name}.sha256"],
-                    "page": rel.get("html_url") or ""}
+                    "page": rel.get("html_url") or "", "notes": rel.get("body") or ""}
     return None
 
 
@@ -134,23 +134,48 @@ def is_local_build(version: str | None = None) -> bool:
     return (version or __version__).endswith("+local")
 
 
-AVAILABLE: dict | None = None  # a newer release found at start-up (``latest()``), waiting for the user's yes
+AVAILABLE: dict | None = None  # the newer release last found, waiting for the user's yes
 UPDATED: str | None = None  # the version installed after the user said yes, which runs from the next start
+ENABLED = False  # this program may update itself (set by ``auto_update``)
+CHECK_TTL = 60.0  # seconds a check is reused: a reload storm must not hit GitHub's limit (60 requests/hour)
+_checked: tuple[float, dict | None] | None = None
 
 
-def _skip_file() -> Path:
-    return config_dir() / "update.json"
+def check(timeout: float = 6.0) -> dict | None:
+    """The newer release to offer now, or None (up to date, already updated, offline, or not self-updating).
+    Called each time the app's page opens."""
+    global AVAILABLE, _checked
+    if not ENABLED or UPDATED:
+        return None
+    now = time.monotonic()
+    if _checked is None or now - _checked[0] > CHECK_TTL:
+        try:
+            info = latest(timeout=timeout)
+        except Exception as e:  # noqa: BLE001 - offline, rate-limited …: this version just keeps running
+            print(f"(update check: {e})", flush=True)
+            return AVAILABLE  # what an earlier check found still stands
+        _checked = (now, info if info and is_newer(info["version"]) else None)
+        AVAILABLE = _checked[1]
+    return AVAILABLE
 
 
-def skipped() -> str | None:
-    """The version the user chose to skip: not offered again (a later one is)."""
-    return read_json(_skip_file(), {}, kind=dict).get("skip")
+NOTES_LINES = 10  # lines of release notes shown in the pop-up
+NOTES_CHARS = 900
 
 
-def skip(version: str) -> None:
-    global AVAILABLE
-    write_json_atomic(_skip_file(), {"skip": version})
-    AVAILABLE = None
+def notes_excerpt(notes: str, lines: int = NOTES_LINES, chars: int = NOTES_CHARS) -> tuple[str, bool]:
+    """The start of a release's notes for the pop-up (markdown) and whether it was cut."""
+    text = re.sub(r"<!--.*?-->", "", notes or "", flags=re.DOTALL).replace("\r\n", "\n").strip()
+    keep, used, cut = [], 0, False
+    for line in text.splitlines():
+        if len(keep) >= lines or used + len(line) > chars:
+            cut = True
+            break
+        keep.append(line)
+        used += len(line) + 1
+    while keep and not keep[-1].strip():
+        keep.pop()
+    return "\n".join(keep), cut
 
 
 def apply(info: dict) -> None:
@@ -174,24 +199,20 @@ def _clean_leftovers(exe: Path) -> None:
 
 
 def _check_in_background() -> None:
-    """Find a newer release; nothing is downloaded until the user says yes."""
-    global AVAILABLE
-    try:
-        info = latest(timeout=10)
-    except Exception as e:  # offline, rate-limited …: this version just keeps running
-        print(f"(update check: {e})", flush=True)
-        return
-    if not info or not is_newer(info["version"]) or info["version"] == skipped():
-        return
-    AVAILABLE = info
-    print(f"SkySqueezer {info['version']} is available: the app asks before installing it.", flush=True)
+    """At start-up: find a newer release early, so the first page can ask at once; nothing is downloaded until the
+    user says yes."""
+    info = check(timeout=10)
+    if info:
+        print(f"SkySqueezer {info['version']} is available: the app asks before installing it.", flush=True)
 
 
 def auto_update() -> None:
-    """Called at startup: looks for a newer release in the background, so the start is never delayed. A newer one
-    is offered to the user (``AVAILABLE``) and installed only on a yes (``apply``); it runs from the next start.
-    Local builds never offer updates here (``sks-dl update`` still can)."""
+    """Called at startup: allows the checks each time the page opens (``check``) and makes the first one in the
+    background, so the start is never delayed. A newer release is offered to the user and installed only on a yes
+    (``apply``); it runs from the next start. Local builds never offer updates here (``sks-dl update`` still can)."""
+    global ENABLED
     if env("NO_UPDATE") or not can_self_update() or is_local_build():
         return
+    ENABLED = True
     _clean_leftovers(Path(sys.executable))
     threading.Thread(target=_check_in_background, name="sks-dl-update", daemon=True).start()

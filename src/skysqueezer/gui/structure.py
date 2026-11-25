@@ -50,8 +50,8 @@ def describe(plan, ratio: float, ratios: dict | None = None) -> dict:
     o = plan.spec.output
     item = 8 if o.dtype == "float64" else 4
     coords = []
-    if plan.n_periods:
-        lab = plan.labels
+    lab = getattr(plan, "out_labels", plan.labels)
+    if len(lab):
         step = (lab[1] - lab[0]) if len(lab) > 1 else None
         rng = f"{lab[0]:%Y-%m-%d %H:%M} … {lab[-1]:%Y-%m-%d %H:%M}"
         coords.append(dict(name="valid_time", dims=("valid_time",), shape=(len(lab),), dtype="int64",

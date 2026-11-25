@@ -38,10 +38,14 @@ def _same(f: dict, defaults: dict, keys) -> bool:
     return all(f.get(k) == defaults.get(k) for k in keys)
 
 
-def dataset_step(f: dict, title: str | None, loaded: bool, failed: bool, has_key: bool) -> tuple[str, str]:
+def dataset_step(f: dict, title: str | None, loaded: bool, failed: bool, has_key: bool,
+                 titles: dict | None = None) -> tuple[str, str]:
     src = SOURCES.get(f.get("source"), f.get("source") or "")
     if failed:
         return "error", f"{src} · {title or f.get('dataset')} · could not be loaded"
+    extra = list(f.get("extra") or []) if f.get("source", "edh") == "edh" else []
+    if extra:  # a combined store: the main dataset, then the added ones
+        title = " + ".join([title or f.get("dataset")] + [(titles or {}).get(x) or x for x in extra])
     if loaded:
         return "done", f"{src} · {title or f.get('dataset')}"
     if title and not has_key:
@@ -53,6 +57,8 @@ def dataset_step(f: dict, title: str | None, loaded: bool, failed: bool, has_key
 
 def variables_step(f: dict) -> tuple[str, str]:
     names = list(f.get("variables") or [])
+    if f.get("source", "edh") == "edh":
+        names += [v for x in f.get("extra") or [] for v in (f.get("xvars") or {}).get(x, [])]
     if not names:
         return "todo", "Choose what to download"
     shown = ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
@@ -109,7 +115,8 @@ def output_step(f: dict, defaults: dict) -> tuple[str, str]:
 
 
 def step_states(f: dict, defaults: dict, *, title: str | None = None, loaded: bool = False, failed: bool = False,
-                has_key: bool = True) -> dict[int, tuple[str, str]]:
-    """Step number -> (state, line). ``title``: the dataset chosen (shown before it loads)."""
-    return {1: dataset_step(f, title, loaded, failed, has_key), 2: variables_step(f), 3: time_step(f, defaults),
+                has_key: bool = True, titles: dict | None = None) -> dict[int, tuple[str, str]]:
+    """Step number -> (state, line). ``title``: the dataset chosen (shown before it loads); ``titles``: names of
+    the datasets added to it (id -> title)."""
+    return {1: dataset_step(f, title, loaded, failed, has_key, titles), 2: variables_step(f), 3: time_step(f, defaults),
             4: area_step(f, defaults), 5: output_step(f, defaults)}

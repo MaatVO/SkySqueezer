@@ -7,6 +7,34 @@ from pathlib import Path
 from typing import Any
 
 
+def current_umask() -> int:
+    """The process umask, read without changing it (setting it to read it back would open a window in which
+    other threads create files with the wrong mode)."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("Umask:"):
+                    return int(line.split()[1], 8)
+    except (OSError, ValueError, IndexError):
+        pass
+    um = os.umask(0o077)  # no /proc (macOS): the brief window errs on the private side
+    os.umask(um)
+    return um
+
+
+def _in_shared(path: Path) -> bool:
+    from .paths import shared_jobs_dir
+
+    shared = shared_jobs_dir()
+    if not shared:
+        return False
+    try:
+        path.resolve().relative_to(shared.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
 def write_json_atomic(path: Path | str, data: Any, mode: int | None = None) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -14,8 +42,9 @@ def write_json_atomic(path: Path | str, data: Any, mode: int | None = None) -> N
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2, default=str)
-        if mode is not None:
-            os.chmod(tmp, mode)
+        if mode is None:  # mkstemp makes 0600; in a shared jobs folder the group must be able to write it too
+            mode = 0o666 & ~current_umask() if _in_shared(path) else 0o600
+        os.chmod(tmp, mode)
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):

@@ -44,12 +44,12 @@ def test_install_verifies_checksum(tmp_path, monkeypatch):
 def test_latest_picks_platform_asset(monkeypatch):
     import json
     monkeypatch.setattr(update, "platform_tag", lambda: "linux-x86_64")
-    rel = {"tag_name": "v0.2.9", "assets": [
+    rel = {"tag_name": "v0.2.9", "body": "- faster maps", "assets": [
         {"name": n, "browser_download_url": f"https://g/{n}"} for n in (
             "sks-dl-v0.2.9-linux-x86_64", "sks-dl-v0.2.9-linux-x86_64.sha256", "sks-dl-v0.2.9-macos-arm64")]}
     monkeypatch.setattr(update, "_get", lambda url, timeout: json.dumps(rel).encode())
     assert update.latest()["url"] == "https://g/sks-dl-v0.2.9-linux-x86_64"
-    assert update.latest()["version"] == "0.2.9"
+    assert update.latest()["version"] == "0.2.9" and update.latest()["notes"] == "- faster maps"
 
 
 class _Threads:
@@ -69,6 +69,7 @@ def _startup(monkeypatch, tmp_path, version):
     monkeypatch.setattr(update, "can_self_update", lambda: True)
     monkeypatch.setattr(update.sys, "executable", str(tmp_path / "sks-dl"))
     monkeypatch.delenv("SKS_DL_NO_UPDATE", raising=False)
+    monkeypatch.setattr(update, "ENABLED", False)  # auto_update turns it on: undone after the test
     threads = _Threads()
     monkeypatch.setattr(update.threading, "Thread", threads)
     update.auto_update()
@@ -92,42 +93,58 @@ def test_release_build_checks_in_the_background_without_delaying_the_start(monke
     assert (tmp_path / ".sks-dl-new-current").exists()
 
 
-def test_a_newer_release_is_only_offered_until_the_user_says_yes(monkeypatch, tmp_path, home):
-    exe = tmp_path / "sks-dl"
+@pytest.fixture
+def offering(monkeypatch):
+    """A self-updating 0.2.3 that GitHub answers with ``served`` (counted in ``calls``)."""
     monkeypatch.setattr(update, "__version__", "0.2.3")
-    monkeypatch.setattr(update.sys, "executable", str(exe))
+    monkeypatch.setattr(update, "ENABLED", True)
     monkeypatch.setattr(update, "AVAILABLE", None)
     monkeypatch.setattr(update, "UPDATED", None)
-    rel = {"version": "0.2.9", "url": "u", "sha_url": "s", "page": "https://github.com/x/releases/v0.2.9"}
-    monkeypatch.setattr(update, "latest", lambda timeout: rel)
+    monkeypatch.setattr(update, "_checked", None)
+    st = {"served": {"version": "0.2.9", "url": "u", "sha_url": "s", "notes": "- faster"}, "calls": 0}
+
+    def latest(timeout):
+        st["calls"] += 1
+        if isinstance(st["served"], Exception):
+            raise st["served"]
+        return st["served"]
+    monkeypatch.setattr(update, "latest", latest)
+    return st
+
+
+def test_a_newer_release_is_only_offered_until_the_user_says_yes(monkeypatch, tmp_path, offering):
+    exe = tmp_path / "sks-dl"
+    monkeypatch.setattr(update.sys, "executable", str(exe))
     got = []
     monkeypatch.setattr(update, "install", lambda info, path: got.append((info["version"], path)))
-    update._check_in_background()
-    assert update.AVAILABLE == rel and got == [] and update.UPDATED is None  # found, not downloaded
-    update.apply(update.AVAILABLE)  # the pop-up's "Download update"
+    assert update.check()["version"] == "0.2.9" and got == [] and update.UPDATED is None  # found, not downloaded
+    update.apply(update.AVAILABLE)  # the pop-up's "Update"
     assert got == [("0.2.9", exe)] and update.UPDATED == "0.2.9" and update.AVAILABLE is None
+    assert update.check() is None  # installed: runs from the next start, not offered again
 
 
-def test_a_skipped_version_is_not_offered_again_but_a_later_one_is(monkeypatch, home):
-    monkeypatch.setattr(update, "__version__", "0.2.3")
-    monkeypatch.setattr(update, "AVAILABLE", None)
-    monkeypatch.setattr(update, "latest", lambda timeout: {"version": "0.2.9", "url": "u", "sha_url": "s"})
-    update._check_in_background()
-    update.skip("0.2.9")  # the pop-up's "Skip this version"
-    assert update.AVAILABLE is None and update.skipped() == "0.2.9"
-    update._check_in_background()  # next start
-    assert update.AVAILABLE is None
-    monkeypatch.setattr(update, "latest", lambda timeout: {"version": "0.3.0", "url": "u", "sha_url": "s"})
-    update._check_in_background()
-    assert update.AVAILABLE["version"] == "0.3.0"
+def test_each_opening_asks_again_after_a_no(monkeypatch, offering):
+    assert update.check()["version"] == "0.2.9"  # the user says "Not now"
+    assert update.check()["version"] == "0.2.9" and offering["calls"] == 1  # a reload at once: no new request
+    monkeypatch.setattr(update, "CHECK_TTL", 0.0)
+    offering["served"] = {"version": "0.3.0", "url": "u", "sha_url": "s"}
+    assert update.check()["version"] == "0.3.0" and offering["calls"] == 2  # the next opening asks GitHub again
 
 
-def test_nothing_is_offered_when_up_to_date_or_offline(monkeypatch, home):
-    monkeypatch.setattr(update, "__version__", "0.2.9")
-    monkeypatch.setattr(update, "AVAILABLE", None)
-    monkeypatch.setattr(update, "latest", lambda timeout: {"version": "0.2.9", "url": "u", "sha_url": "s"})
-    update._check_in_background()
-    assert update.AVAILABLE is None
-    monkeypatch.setattr(update, "latest", lambda timeout: (_ for _ in ()).throw(OSError("offline")))
-    update._check_in_background()  # offline: says so, changes nothing, raises nothing
-    assert update.AVAILABLE is None
+def test_nothing_is_offered_when_up_to_date_offline_or_not_self_updating(monkeypatch, offering):
+    offering["served"] = {"version": "0.2.3", "url": "u", "sha_url": "s"}
+    assert update.check() is None
+    monkeypatch.setattr(update, "CHECK_TTL", 0.0)
+    offering["served"] = OSError("offline")
+    assert update.check() is None  # says so, changes nothing, raises nothing
+    monkeypatch.setattr(update, "ENABLED", False)  # from source, a local build, --no-update
+    offering["served"] = {"version": "0.9.0", "url": "u", "sha_url": "s"}
+    assert update.check() is None and offering["calls"] == 2
+
+
+def test_release_notes_excerpt():
+    notes = "<!-- generated -->\r\n## What's new\r\n\r\n" + "\n".join(f"- change {i}" for i in range(30))
+    text, cut = update.notes_excerpt(notes, lines=5)
+    assert text.splitlines() == ["## What's new", "", "- change 0", "- change 1", "- change 2"] and cut
+    assert update.notes_excerpt("- one\n- two") == ("- one\n- two", False)
+    assert update.notes_excerpt("") == ("", False)

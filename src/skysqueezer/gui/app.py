@@ -20,11 +20,13 @@ from nicegui import app, run, ui
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .. import __version__, chunking
+from ..projection import box_outline
 from .messages import dataset_error, display_version, launch_reason
 from ..backend import BackendError, Local
 from ..runner import ACTIVE
 from ..quota import next_reset
-from ..job import COMPRESSORS, FREQS, STATS, AreaSpec, CdsSpec, DownloadSpec, JobSpec, OutputSpec, Point, TimeSpec
+from ..job import (COMPRESSORS, FREQS, STATS, AreaSpec, CdsSpec, DownloadSpec, JobSpec, OutputSpec, PartSpec, Point,
+                   TimeSpec)
 from ..util import human_bytes, human_duration
 from . import logo, structure, tour
 from .auth import TokenMiddleware
@@ -32,7 +34,8 @@ from .fold import Fold
 from .steps import REQUIRED as STEP_REQUIRED, STATUS as STEP_STATUS, TITLES as STEP_TITLES, step_states
 from .theme import PINK, apply_theme
 
-STRUCT_KEYS = ("id", "status", "alive", "error", "outputs", "outputs_exist", "spec")
+STRUCT_KEYS = ("id", "status", "alive", "error", "outputs", "outputs_exist", "spec", "created_by", "run_by", "mine",
+               "takeover")
 STATUS_COLOR = {"running": "positive", "starting": "positive", "exporting": "positive", "completed": "positive",
                 "failed": "negative", "interrupted": "negative", "unreadable": "negative", "paused": "grey-6",
                 "paused_quota": "warning", "waiting_quota": "warning", "cancelled": "grey-6", "created": "grey-6"}
@@ -142,9 +145,11 @@ def job_note(s: dict, done: int, total: int) -> str:
     if st in ("paused", "cancelled"):
         return f"{committed} {resume}"
     if st == "paused_quota":
-        return f"Reached the monthly quota limit. Resume after the monthly reset. {committed}"
+        return (f"Reached the monthly quota limit. Resume after the monthly reset, or now with another key "
+                f"(yours or a colleague's). {committed}")
     if st == "waiting_quota":
-        return "Reached the monthly quota limit. The job continues by itself after the reset."
+        return ("Reached the monthly quota limit. The job continues by itself after the reset, or sooner when "
+                "someone takes it over with another key.")
     if st == "unreadable":
         return s.get("error") or ""
     return ""
@@ -323,7 +328,10 @@ PRESETS = {
     "Alps": (5.0, 43.5, 17.0, 48.5),
     "Trentino-Alto Adige": (10.3, 45.6, 12.6, 47.1),
 }
-OSM_TILES = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"  # darkened with a CSS filter (theme.py)
+# the area map draws a vector basemap in the dataset's own projection (projmap.js, projection.py)
+PROJMAP_JS = (Path(__file__).parent / "projmap.js").read_text(encoding="utf-8")
+app.add_static_file(local_file=Path(__file__).parent / "data" / "basemap.json.gz", url_path="/_sks/basemap.json.gz")
+WORLD = {"kind": "latlon"}  # until a dataset tells its grid
 # ------------------------------------------------------------------ helpers
 
 DEFAULT_QUOTA = 500_000  # free DestinE access: requests per calendar month
@@ -340,6 +348,7 @@ FORMAT_LABELS = {"grib": "GRIB", "netcdf": "NetCDF", "netcdf4": "NetCDF4", "netc
                  "netcdf_zip": "NetCDF (zip)", "csv": "CSV", "zip": "ZIP", "tgz": "TGZ"}
 VAR_COLUMNS = [
     {"name": "name", "label": "Name", "field": "name", "sortable": True, "align": "left"},
+    {"name": "info", "label": "About", "field": "key", "align": "center"},
     {"name": "long_name", "label": "Description", "field": "long_name", "align": "left"},
     {"name": "units", "label": "Units", "field": "units", "align": "left"},
     {"name": "kind", "label": "Dimensions", "field": "kind", "align": "left"},
@@ -455,6 +464,33 @@ def option_template(urls: list[str | None]) -> str:
       </q-item>"""
 
 
+STEP_TYPES = {"instant": "instantaneous value at the time step",
+              "accum": "accumulated over the hour before the time step",
+              "avg": "average over the hour before the time step", "max": "maximum since the previous post-processing",
+              "min": "minimum since the previous post-processing"}
+LEVEL_TYPES = {"surface": "single level (surface or column)", "isobaricInhPa": "pressure levels (hPa)",
+               "depthBelowLandLayer": "soil layers", "heightAboveGround": "height above ground"}
+
+
+def description_html(paragraphs: list[list[dict]]) -> str:
+    """A parameter description (``params.paragraphs``) as HTML built here: every text is escaped and links are
+    https only, so nothing from the other site is rendered as markup."""
+    out = []
+    for para in paragraphs:
+        bits = []
+        for x in para:
+            t = html.escape(x.get("text", ""))
+            href = x.get("href") or ""
+            if href.startswith("https://"):
+                if bits and not bits[-1].endswith((" ", "(")):
+                    bits.append(" ")
+                bits.append(f'<a href="{html.escape(href, quote=True)}" target="_blank" rel="noopener noreferrer">{t}</a>')
+            else:
+                bits.append(t)
+        out.append(f"<p>{''.join(bits)}</p>")
+    return "".join(out)
+
+
 def tip(text: str):
     """A small '?' icon that explains something on hover or focus. Keyboard: Tab to it, Esc closes. Screen readers
     get the text as the button's name, so they do not depend on the tooltip appearing."""
@@ -566,6 +602,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
     jobs or files itself, only asks ``be`` (see service.py). ``embedded``: shown in a tab of the connect page,
     whose top bar has the Tour button."""
     apply_theme()
+    ui.add_body_html(f"<script>{PROJMAP_JS}</script>")
     # a failure in any handler must not break the page: say so and carry on
     ui.on_exception(lambda e: ui.notify(f"Something went wrong: {type(e).__name__}: {e}", type="negative"))
     f = {  # form model
@@ -585,8 +622,13 @@ def build_page(be, local: bool = False, embedded: bool = False):
         # Climate Data Store
         "source": "edh", "cds_options": {}, "grid": "native", "grid_custom": 0.5, "max_inflight": 4,
         "pack": "auto", "max_request_gb": 10.0,
+        # combined store: the other datasets' selections (Earth Data Hub); the form edits one more
+        # one store from several Earth Data Hub datasets: the datasets added to the main one, their variables and
+        # statistics, and each dataset's own period where it differs from the common one (dataset -> {start, end})
+        "extra": [], "xvars": {}, "xstats": {}, "ptime": {},
     }
-    ctx = {"keys": {"default": None, "keys": []}, "plan_seq": 0, "ds": None, "info": None, "plan": None, "plan_task": None, "rec": ("auto", ""),
+    ctx = {"dss": {}, "xinfo": {}, "xerr": {},
+           "keys": {"default": None, "keys": []}, "plan_seq": 0, "ds": None, "info": None, "plan": None, "plan_task": None, "rec": ("auto", ""),
            "thumbs": {}, "thumbs_asked": set(),  # thumbs: collection -> dataset id -> image URL
            # per source: the collection and dataset last chosen, and the key
            "sel": {"edh": ("era5", "era5-single-levels-atmosphere"), "cds": ("Reanalysis", "reanalysis-era5-single-levels")},
@@ -725,7 +767,8 @@ def build_page(be, local: bool = False, embedded: bool = False):
         info = ctx.get("info") or {}
         states = step_states(f, step_defaults, title=ds_title.text or None,
                              loaded=bool(ctx.get("ds")) and info.get("id") == f["dataset"],
-                             failed=ds_err.visible, has_key=bool(f.get("key")))
+                             failed=ds_err.visible, has_key=bool(f.get("key")),
+                             titles={x: (i or {}).get("title") for x, i in ctx["xinfo"].items()})
         for n, (state, line) in states.items():
             fo = step_folds[n]
             status, tone = STEP_STATUS[state]
@@ -788,6 +831,18 @@ def build_page(be, local: bool = False, embedded: bool = False):
                             ds_err.set_visibility(False)
                             cds_box = ui.column().classes("w-full gap-3")  # CDS: tier, licences, dataset options
                             cds_box.set_visibility(False)
+                            # more datasets into the same store (Earth Data Hub, same grid)
+                            with ui.column().classes("w-full gap-2 pt-3 mt-1 border-t border-white/10") as combine_row:
+                                with ui.row().classes("items-center gap-1 no-wrap"):
+                                    ui.label("Combine with other datasets").classes("text-body2 text-weight-medium")
+                                    tip("Add datasets to download into the same store as this one, e.g. ERA5 pressure "
+                                        "levels next to single levels. Only datasets on the same grid (projection, "
+                                        "domain and resolution) can share a store. Their variables are listed together "
+                                        "in Variables, and each can have its own period in Time.")
+                                extra_select = ui.select({}, multiple=True, with_input=True,
+                                                         label="Datasets on the same grid").props(
+                                    "use-chips dense outlined clearable").classes("w-full")
+                                extras_box = ui.column().classes("w-full gap-2")
 
                         # ---------- variables
                         with step(2, mark="variables"):
@@ -797,7 +852,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
                                     ui.icon("search")
                                 sel_label = ui.label().classes("edh-muted text-caption")
                             sel_chips = ui.row().classes("gap-2 items-center w-full edh-sel-box").style("position:sticky;top:64px;z-index:var(--z-sticky);padding:8px 12px")
-                            var_table = ui.table(rows=[], columns=list(VAR_COLUMNS), row_key="name", selection="multiple", pagination=8).props("flat dense").classes("edh-table w-full")
+                            var_table = ui.table(rows=[], columns=list(VAR_COLUMNS), row_key="key", selection="multiple", pagination=8).props("flat dense").classes("edh-table w-full")
                             with var_table.add_slot("no-data"):
                                 var_empty = ui.label("Load a dataset to list its variables.").classes("edh-muted")
                             # the selection checkboxes need names a screen reader can say
@@ -807,6 +862,19 @@ def build_page(be, local: bool = False, embedded: bool = False):
                                                '<q-checkbox v-model="props.selected" dense dark '
                                                ':aria-label="`Select ${props.row.name}`" />')
                             var_search.bind_value(var_table, "filter")
+                            var_table.add_slot("body-cell-info", """
+                              <q-td :props="props" auto-width>
+                                <q-btn flat round dense size="sm" icon="info_outline" color="primary"
+                                       :aria-label="`About ${props.row.name}`"
+                                       @click.stop="() => $parent.$emit('varinfo', props.row)">
+                                  <q-tooltip>What {{ props.row.name }} is (ECMWF Parameter Database)</q-tooltip>
+                                </q-btn>
+                              </q-td>""")
+                            var_table.add_slot("body-cell-dataset", """
+                              <q-td :props="props">
+                                <div class="text-body2">{{ props.row.dataset }}</div>
+                                <div class="edh-mono text-caption edh-muted">{{ props.row.ds_id }}</div>
+                              </q-td>""")
                             with ui.row().classes("items-center gap-2") as level_row:
                                 level_select = ui.select([], multiple=True, label="Pressure levels (hPa)").props(
                                     "use-chips dense outlined").classes("min-w-[28rem]")
@@ -818,6 +886,9 @@ def build_page(be, local: bool = False, embedded: bool = False):
                         # ---------- time
                         with step(3, mark="time"):
                             hour_inputs = []
+                            time_all_label = ui.label("Common period and time step, for every dataset").classes(
+                                "text-body2 text-weight-medium")
+                            time_all_label.set_visibility(False)
                             with ui.row().classes("items-center gap-4"):
                                 for key_, label, hkey in (("start", "First day", "start_hour"), ("end", "Last day", "end_hour")):
                                     with ui.input(label).bind_value(f, key_).classes("w-44") as inp:
@@ -855,6 +926,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
                                     "Defaults: sum for accumulated fields such as tp, mean otherwise.")
                             stats_head.bind_visibility_from(f, "freq", lambda v: v != "none")
                             stats_box = ui.column().classes("gap-2")
+                            time_parts_box = ui.column().classes("w-full gap-3")  # several datasets: one block each
 
                         # ---------- area
                         with step(4, mark="area"):
@@ -884,16 +956,16 @@ def build_page(be, local: bool = False, embedded: bool = False):
                                 draw = {"draw": {"rectangle": {"shapeOptions": {"color": PINK}}, "polyline": False,
                                                  "polygon": False, "circle": False, "marker": False, "circlemarker": False},
                                         "edit": {"edit": False, "remove": False}}
-                                with ui.element("div").classes("relative grow basis-72 h-72 min-w-0"):
+                                # capped width + fixed ratio: a full-width map in a wide card was a thin strip
+                                with ui.element("div").classes(
+                                        "relative grow basis-80 max-w-3xl self-start aspect-[16/10] min-h-64 min-w-0"):
                                     area_map = ui.leaflet(center=(46.0, 11.0), zoom=4, draw_control=draw,
-                                                          hide_drawn_items=True).classes("edh-map w-full h-full")
+                                                          hide_drawn_items=True).classes("edh-map absolute inset-0 w-full h-full")
                                     ui.button("Center", icon="center_focus_strong", on_click=lambda: center_map()).props(
                                         "dense unelevated no-caps size=sm").classes(
                                         "edh-map-btn absolute bottom-3 right-3 z-[1000]").tooltip(
                                         "zoom to the selected area")
                                 area_map.clear_layers()
-                                area_map.tile_layer(url_template=OSM_TILES, options={
-                                    "attribution": "&copy; OpenStreetMap contributors", "maxZoom": 19})
                             with ui.expansion("Advanced", icon="tune").classes("edh-expansion w-full"):
                                 with ui.row().classes("p-3"):
                                     with_tip(ui.select({"-180..180": "−180 … 180", "0..360": "0 … 360"},
@@ -932,6 +1004,9 @@ def build_page(be, local: bool = False, embedded: bool = False):
                                 ui.input("Directory (on the server)").bind_value(f, "directory").classes("grow")
                                 ui.button(icon="folder_open", on_click=lambda: later(pick_folder)).props(
                                     'flat round aria-label="Choose a folder on the server"').tooltip("choose a folder")
+                                ui.button(icon="fact_check", on_click=lambda: later(check_folder)).props(
+                                    'flat round aria-label="Check the folder"').tooltip(
+                                    "check that jobs can write here (e.g. a NAS mounted on the server)")
                             ui.input("Name").bind_value(f, "name").classes("w-64")
                             fmt_select = with_tip(ui.select({"zarr": "Zarr", "both": "Zarr + Icechunk", "icechunk": "Icechunk only"},
                                                label="Format").bind_value(f, "out_format").classes("w-48"),
@@ -1120,6 +1195,11 @@ def build_page(be, local: bool = False, embedded: bool = False):
         # ================================================================ JOBS
         with ui.tab_panel(t_jobs).classes("px-0 edh-tour-jobs"):
             ui.label("Jobs").classes("sr-only").props("role=heading aria-level=2")
+            with ui.row().classes("w-full items-center gap-2 pb-2 no-wrap"):
+                jobs_folder_icon = ui.icon("folder", color="grey-6", size="xs")
+                jobs_folder_label = ui.label("").classes("edh-muted text-caption edh-mono grow min-w-0 break-all")
+                ui.button("Jobs folder", icon="folder_shared", on_click=lambda: later(edit_jobs_folder)).props(
+                    "flat dense no-caps size=sm").tooltip("share jobs with colleagues on this server")
             jobs_rollup = ui.html("", sanitize=False).classes("text-body2 pb-3")
             jobs_announce = ui.label("").classes("sr-only").props("role=status aria-live=polite")
             jobs_box = ui.column().classes("w-full gap-2")
@@ -1177,7 +1257,9 @@ def build_page(be, local: bool = False, embedded: bool = False):
             f["dataset"] = next(iter(ds_select.options))
         ds_select.value = f["dataset"]
         ds_select.update()
+        set_extra_options()
         await load_dataset()
+        await load_extras()
 
     def show_dataset(info):
         """The chosen dataset's image and name, which come from the catalogue and need no API key."""
@@ -1236,6 +1318,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
             return
         ds["vars"] = {v["name"]: v for v in ds["variables"]}
         ctx["ds"], ctx["info"] = ds, info
+        set_projection(ds.get("projection"))
         s = ds["summary"]
         t = s["time"] or ["—", "—"]
         ds_info.content = info.get("abstract", "")[:420]
@@ -1247,18 +1330,8 @@ def build_page(be, local: bool = False, embedded: bool = False):
                 parts.append(f"{len(s['levels'])} levels")
             ui.label(" · ".join(parts)).classes("edh-muted text-caption")
         time_range_label.text = f"available {t[0][:10]} → {t[1][:10]}"
-        rows = [{**v, "kind": {"time": "time × lat × lon", "level": "time × level × lat × lon",
-                               "static": "lat × lon (static)"}.get(v["kind"], "unsupported")}
-                for v in ds["variables"]]
-        var_table.rows = rows
-        var_table.selected = [r for r in rows if r["name"] in f["variables"]]
-        var_table.update()
-        if ds["levels"] is not None:
-            level_select.options = ds["levels"]
-            level_select.value = [l for l in f["levels"] if l in level_select.options] or []
-            level_select.update()
-        level_row.set_visibility(ds["levels"] is not None)
-        on_vars_changed()
+        render_extras()
+        rebuild_vars()
 
     async def load_cds_dataset(info, refresh=False):
         """A CDS dataset from its download form (public); with a key, also its licence status (free)."""
@@ -1272,6 +1345,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
         if d["id"] != f["dataset"] or f["source"] != "cds":  # another dataset or source was chosen meanwhile
             return
         ctx["cds_desc"] = d
+        set_projection(d.get("projection"))
         lv = d["levels"]
         kind = "time × level × space" if lv else "time × space"
         ds = {"summary": {"time": [info.get("start") or "", info.get("end") or ""], "levels": lv["values"] if lv else None},
@@ -1289,7 +1363,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
                      "area cut by the CDS" if d.get("area") else "whole domain delivered"]
             ui.label(" · ".join(p for p in parts if p)).classes("edh-muted text-caption")
         time_range_label.text = f"available {t0} → {t1}" if t0 else ""
-        rows = [{**v, "kind": kind} for v in ds["variables"]]
+        rows = [{**v, "kind": kind, "key": v["name"]} for v in ds["variables"]]
         var_table.rows = rows
         var_table.selected = [r for r in rows if r["name"] in f["variables"]]
         var_table.update()
@@ -1500,6 +1574,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
         for el in (conn_row, sample_row, quota_row, wait_row):
             el.set_visibility(not cds)
         cds_settings.set_visibility(cds)
+        combine_row.set_visibility(not cds)
 
     async def switch_source(e):
         v = e.value
@@ -1513,6 +1588,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
         ctx["src_gen"] += 1
         ctx["plan_seq"] += 1
         ctx.update(ds=None, info=None, cds_desc=None, plan=None, rec=None, items={}, cds_opts_box=None, cds_opt_sel={})
+        set_projection(None)
         block_launch()
         var_table.rows, var_table.selected = [], []
         var_table.update()
@@ -1527,6 +1603,8 @@ def build_page(be, local: bool = False, embedded: bool = False):
     async def on_collection(e):
         if e.value and e.value != f["collection"]:
             f["collection"] = e.value
+            f["extra"] = []  # datasets are combined within one collection
+            render_extras()
             await load_items()
 
     async def on_dataset(e):
@@ -1534,6 +1612,9 @@ def build_page(be, local: bool = False, embedded: bool = False):
             if e.value != f["dataset"]:
                 f["cds_options"] = {}
             f["dataset"] = e.value
+            if e.value in f["extra"]:  # the main dataset is no longer an added one
+                f["extra"] = [x for x in f["extra"] if x != e.value]
+            set_extra_options()
             await load_dataset()
 
     coll_select.on_value_change(on_collection)
@@ -1541,58 +1622,369 @@ def build_page(be, local: bool = False, embedded: bool = False):
 
     # ------------------------------------------------------------------ variables / stats
     def on_vars_changed():
-        f["variables"] = [r["name"] for r in var_table.selected]
-        sel_label.text = f"{len(f['variables'])} selected" if f["variables"] else "none selected"
+        sel = var_table.selected
+        on = [x for x, _ in datasets_on()]
+        if len(on) > 1:  # several datasets: each keeps its own ticks (one still loading keeps what it had)
+            f["variables"] = [r["name"] for r in sel if r.get("ds_id") == f["dataset"]]
+            f["xvars"] = {**f["xvars"], **{x: [r["name"] for r in sel if r.get("ds_id") == x] for x in on[1:]}}
+            groups = [(x, sel_of(x)) for x in on]
+            text = "  ·  ".join(f"{title_of(x)}: {', '.join(v)}" for x, v in groups if v)
+            n = sum(len(v) for _, v in groups)
+        else:
+            f["variables"] = [r["name"] for r in sel]
+            text, n = ", ".join(f["variables"]), len(f["variables"])
+        sel_label.text = f"{n} selected" if n else "none selected"
         sel_chips.clear()
         with sel_chips:
             ui.label("Selected").classes("text-weight-medium")
-            ui.label(", ".join(f["variables"]) if f["variables"] else "none, tick variables below").classes(
-                "edh-mono" if f["variables"] else "edh-muted")
+            ui.label(text or "none, tick variables below").classes("edh-mono" if text else "edh-muted")
         render_stats()
         if f["source"] == "cds":
             later(refresh_cds_options)
         schedule_plan()
 
     var_table.on("selection", lambda e: on_vars_changed())
+
+    async def show_var_info(e):
+        """A pop-up on what a variable is: its attributes here, and the official description (ECMWF Parameter
+        Database, by its GRIB parameter id) read through the backend."""
+        r = e.args or {}
+        x = r.get("ds_id") or f["dataset"]
+        cds = f["source"] == "cds"
+        with dialog_host, ui.dialog() as dlg, ui.card().classes("edh-card gap-3").style(
+                "width:min(680px,94vw);max-width:94vw"):
+            with ui.row().classes("w-full items-start justify-between no-wrap gap-3"):
+                with ui.column().classes("gap-0 min-w-0"):
+                    ui.label(r.get("name", "")).classes("edh-title edh-mono")
+                    ui.label(r.get("long_name") or "").classes("text-body1")
+                ui.button(icon="close", on_click=dlg.close).props('flat round aria-label="Close"')
+            with ui.column().classes("w-full gap-1"):
+                kv("Dataset", f"{title_of(x)} ({x})")
+                if r.get("units"):
+                    kv("Units", r["units"])
+                kv("Dimensions", r.get("kind") or "")
+                if r.get("level_type"):
+                    kv("Level", LEVEL_TYPES.get(r["level_type"], r["level_type"]))
+                if r.get("step_type"):
+                    kv("Value", STEP_TYPES.get(r["step_type"], r["step_type"]))
+                if r.get("param_id"):
+                    kv("GRIB parameter", f"{r['param_id']}" + (f" · {r['short_name']}" if r.get("short_name") else ""))
+                if r.get("standard_name"):
+                    kv("CF standard name", r["standard_name"])
+            body = ui.column().classes("w-full gap-2 border-t border-white/10 pt-3")
+            with body:
+                if r.get("param_id"):
+                    with ui.row().classes("items-center gap-2"):
+                        ui.spinner(size="sm")
+                        ui.label("Reading the ECMWF Parameter Database…").classes("edh-muted text-caption")
+                else:
+                    ui.label("This variable has no GRIB parameter id, so there is no entry to read in the ECMWF "
+                             "Parameter Database. The dataset's documentation describes it.").classes(
+                        "edh-muted text-body2")
+                    if cds:
+                        ui.link("Dataset documentation on the Climate Data Store ↗",
+                                f"https://cds.climate.copernicus.eu/datasets/{x}?tab=overview", new_tab=True)
+        dlg.on("hide", lambda: dlg.delete())
+        dlg.open()
+        if not r.get("param_id"):
+            return
+        try:
+            res = await be.call("param_info", param_id=int(r["param_id"]))
+        except BackendError as err:
+            res = {"ok": False, "error": str(err), "url": f"https://codes.ecmwf.int/grib/param-db/{int(r['param_id'])}"}
+        body.clear()
+        with body:
+            if res.get("ok"):
+                with ui.row().classes("items-baseline gap-2"):
+                    ui.label(res["name"]).classes("text-body1 text-weight-medium")
+                    if res.get("units"):
+                        ui.label(res["units"]).classes("edh-mono edh-muted text-caption")
+                ui.html(description_html(res.get("paragraphs") or [])).classes("text-body2 edh-param-desc")
+            else:
+                ui.label(f"The ECMWF Parameter Database could not be read ({res.get('error')}).").classes(
+                    "text-caption text-warning")
+            ui.link("Source: ECMWF Parameter Database ↗", res["url"], new_tab=True).classes("text-caption")
+
+    var_table.on("varinfo", show_var_info)
+
+    # ------------------------------------------------------------------ several datasets in one store (EDH)
+    def multi() -> bool:
+        return f["source"] == "edh" and bool(f["extra"])
+
+    def short(ds_id: str) -> str:
+        return ds_id.removeprefix("era5-") or ds_id
+
+    def title_of(x: str) -> str:
+        info = ctx["info"] if x == f["dataset"] else ctx["xinfo"].get(x)
+        return (info or {}).get("title") or x
+
+    def compat_problem(x: str) -> str | None:
+        """Why dataset ``x`` cannot share a store with the main one (None when it can, or before both loaded)."""
+        main, d = ctx.get("ds"), ctx["dss"].get(x)
+        if not main or d is None or f["source"] != "edh":
+            return None
+        a, b = main["summary"], d["summary"]
+        if list(a["grid"]) != list(b["grid"]):
+            return (f"grid {b['grid'][0]}×{b['grid'][1]}, the main dataset {a['grid'][0]}×{a['grid'][1]}: only "
+                    f"datasets with the same projection, domain and resolution can share a store")
+        if main.get("projection") != d.get("projection"):
+            return "another projection or domain than the main dataset: it cannot share its store"
+        return None
+
+    def datasets_on() -> list[tuple[str, dict]]:
+        """(id, description) of each dataset in the store: the main one, then the added ones loaded and fitting."""
+        out = []
+        if ctx.get("ds") and (ctx.get("info") or {}).get("id") == f["dataset"]:
+            out.append((f["dataset"], ctx["ds"]))
+        if f["source"] == "edh":
+            out += [(x, ctx["dss"][x]) for x in f["extra"] if x in ctx["dss"] and not compat_problem(x)]
+        return out
+
+    def sel_of(x: str) -> list[str]:
+        return f["variables"] if x == f["dataset"] else f["xvars"].get(x, [])
+
+    def stats_of(x: str) -> dict:
+        return f["stats"] if x == f["dataset"] else f["xstats"].setdefault(x, {})
+
+    def set_extra_options():
+        items = [i for i in (ctx.get("items") or {}).values() if not i.get("deprecated")]
+        opts = {i["id"]: i["title"] for i in items if i["id"] != f["dataset"]}
+        opts.update({x: title_of(x) for x in f["extra"] if x not in opts})
+        extra_select.set_options(opts, value=list(f["extra"]))
+
+    async def load_extra(x: str):
+        info = (ctx.get("items") or {}).get(x) or ctx["xinfo"].get(x)
+        if not info or not f.get("key"):
+            return
+        ctx["xinfo"][x] = info
+        ctx["xerr"].pop(x, None)
+        render_extras()
+        try:
+            d = await be.call("dataset_load", info=info, key=f["key"])
+        except BackendError as e:
+            ctx["xerr"][x] = str(e)
+            render_extras()
+            return
+        d["vars"] = {v["name"]: v for v in d["variables"]}
+        ctx["dss"][x] = d
+        render_extras()
+        rebuild_vars()
+
+    async def load_extras():
+        for x in list(f["extra"]):
+            if x not in ctx["dss"]:
+                await load_extra(x)
+
+    async def on_extra(e):
+        vals = [v for v in (e.value or []) if v != f["dataset"]]
+        if vals == f["extra"]:
+            return
+        f["extra"] = vals
+        f["xvars"] = {k: v for k, v in f["xvars"].items() if k in vals}
+        render_extras()
+        rebuild_vars()
+        await load_extras()
+
+    extra_select.on_value_change(on_extra)
+
+    def remove_extra(x: str):
+        extra_select.value = [y for y in f["extra"] if y != x]  # on_extra does the rest
+
+    def render_extras():
+        extras_box.clear()
+        with extras_box:
+            for x in f["extra"]:
+                d, err, why = ctx["dss"].get(x), ctx["xerr"].get(x), compat_problem(x)
+                info = ctx["xinfo"].get(x) or {}
+                with ui.row().classes("w-full items-center gap-3 no-wrap edh-sel-box").style("padding:6px 10px"):
+                    dataset_image(info.get("thumbnail"), "", "edh-thumb-sm")
+                    with ui.column().classes("gap-0 grow min-w-0"):
+                        ui.label(title_of(x)).classes("text-body2 text-weight-medium")
+                        if d is not None:
+                            sm = d["summary"]
+                            t = sm["time"] or ["—", "—"]
+                            bits = [f"{t[0][:10]} to {t[1][:10]}", f"step {sm['time_step']}",
+                                    f"grid {sm['grid'][0]}×{sm['grid'][1]}", f"{sm['variables']} variables"]
+                            if sm["levels"]:
+                                bits.append(f"{len(sm['levels'])} levels")
+                            ui.label(" · ".join(bits)).classes("edh-muted text-caption")
+                            main = (ctx.get("ds") or {}).get("summary") or {}
+                            if not why and main.get("time_step") and sm["time_step"] != main["time_step"]:
+                                ui.label(f"step {sm['time_step']}, the main dataset {main['time_step']}: choose a "
+                                         f"common time step in Time (e.g. daily)").classes("text-caption text-warning")
+                        elif err:
+                            ui.label(f"could not be loaded: {err}").classes("text-caption text-negative")
+                        else:
+                            ui.label("loading…" if f.get("key") else "add an API key to load it").classes(
+                                "edh-muted text-caption")
+                        if why:
+                            ui.label(why).classes("text-caption text-negative")
+                    if d is not None:
+                        ui.icon("error_outline" if why else "check_circle", color="negative" if why else "positive",
+                                size="xs").tooltip(why or "same grid: it can share the store")
+                    ui.button(icon="close", on_click=lambda x=x: remove_extra(x)).props(
+                        f'flat round dense size=sm aria-label="Remove {x}"').tooltip("remove from the store")
+
+    def rebuild_vars():
+        """The variables table: every dataset's variables, with a Dataset column when there are several."""
+        on = datasets_on()
+        many = len(on) > 1
+        kinds = {"time": "time × lat × lon", "level": "time × level × lat × lon", "static": "lat × lon (static)"}
+        rows = [{**v, "kind": kinds.get(v["kind"], "unsupported"), "dataset": title_of(x), "ds_id": x,
+                 "key": f"{x}|{v['name']}" if many else v["name"]}
+                for x, d in on for v in d["variables"]]
+        cols = list(VAR_COLUMNS)
+        if many:
+            cols.insert(3, {"name": "dataset", "label": "Dataset", "field": "dataset", "sortable": True,
+                            "align": "left"})
+        var_table.columns = cols
+        var_table.rows = rows
+        var_table.selected = [r for r in rows if r["name"] in sel_of(r["ds_id"])]
+        var_table.update()
+        levels = []
+        for _, d in on:
+            levels += [lv for lv in d.get("levels") or [] if lv not in levels]
+        if levels:
+            level_select.options = levels
+            level_select.value = [lv for lv in f["levels"] if lv in levels]
+            level_select.update()
+        level_row.set_visibility(bool(levels))
+        on_vars_changed()
+
     level_select.on_value_change(lambda e: (f.update(levels=e.value or []), schedule_plan(),
                                             later(refresh_cds_options) if f["source"] == "cds" else None))
 
     def render_stats():
         stats_box.clear()
+        render_time_parts()
         ds = ctx["ds"]
-        if not ds or f["freq"] == "none":
+        if not ds or f["freq"] == "none" or multi():
             return
         with stats_box:
-            for name in f["variables"]:
-                v = ds["vars"].get(name)
-                if v is None or v["kind"] == "static":
-                    continue
-                cds = f["source"] == "cds"
-                cur = f["stats"].get(name) or ([] if cds else [v["default_stat"]])
-                with ui.row().classes("items-center gap-3"):
-                    ui.label(name).classes("w-56 edh-mono" if cds else "w-20 edh-mono")
-                    out = ui.label().classes("edh-muted text-caption edh-mono")
+            stat_rows(ds, f["variables"], f["stats"])
 
-                    def show(vals, n=name, out=out, cds=cds):
-                        vals = vals or []
-                        if cds:
-                            out.text = ("Default: sum for accumulations, mean otherwise" if not vals else
-                                        "Output named after the GRIB field" + ("" if len(vals) == 1 else
-                                        ", " + ", ".join(f"…_{x}" for x in vals)))
-                            return
-                        out.text = "Output: " + (n if len(vals) == 1 else ", ".join(f"{n}_{x}" for x in vals))
+    def avail_warning(x: str, d: dict) -> str:
+        """What the period chosen for dataset ``x`` asks beyond its data (empty when it is inside)."""
+        pt = f["ptime"].get(x, {})
+        a, b = pt.get("start") or f["start"], pt.get("end") or f["end"]
+        t = d["summary"].get("time") or ["", ""]
+        t0, t1 = (t[0] or "")[:10], (t[1] or "")[:10]
+        if not (t0 and a and b):
+            return ""
+        if b < t0 or a > t1:
+            return f"no data in this period (data {t0} to {t1})"
+        out = []
+        if a < t0:
+            out.append(f"data starts {t0}: the steps before stay empty")
+        if b > t1:
+            out.append(f"data ends {t1}: the steps after stay empty")
+        return "; ".join(out)
 
-                    def changed(e, n=name, show=show):
-                        f["stats"][n] = e.value
-                        show(e.value)
+    def render_time_parts():
+        time_parts_box.clear()
+        on = datasets_on()
+        many = len(on) > 1
+        time_all_label.set_visibility(many)
+        if not many:
+            return
+        spans = [d["summary"]["time"] for _, d in on if d["summary"].get("time")]
+        if spans:  # the common period can reach from the earliest start to the latest end of the datasets
+            time_range_label.text = (f"available {min(a for a, _ in spans)[:10]} → {max(b for _, b in spans)[:10]} "
+                                     f"(all datasets)")
+        with time_parts_box:
+            for x, d in datasets_on():
+                names = sel_of(x)
+                pt = f["ptime"].get(x, {})
+                sm = d["summary"]
+                t = sm["time"] or ["—", "—"]
+                with ui.column().classes("w-full gap-2 edh-sel-box").style("padding:10px 12px"):
+                    with ui.row().classes("w-full items-baseline justify-between gap-3"):
+                        ui.label(title_of(x)).classes("text-body2 text-weight-medium")
+                        ui.label(f"data {t[0][:10]} → {t[1][:10]} · step {sm['time_step']}").classes(
+                            "edh-muted text-caption")
+                    if not names:
+                        ui.label("No variables ticked: this dataset is left out.").classes("edh-muted text-caption")
+                        continue
+                    warn = ui.label().classes("text-caption text-warning")
+
+                    def show_warn(x=x, d=d, warn=warn):
+                        warn.text = avail_warning(x, d)
+                        warn.set_visibility(bool(warn.text))
+
+                    def set_pt(value, k, x=x, show_warn=show_warn):
+                        cur = dict(f["ptime"].get(x, {}))
+                        if value and value != f[k]:
+                            cur[k] = value
+                        else:
+                            cur.pop(k, None)
+                        f["ptime"] = {**f["ptime"], x: cur} if cur else {
+                            k_: v for k_, v in f["ptime"].items() if k_ != x}
+                        show_warn()
                         schedule_plan()
 
-                    ui.select(list(STATS), value=cur, multiple=True, on_change=changed).props(
-                        "dense outlined use-chips").classes("min-w-[18rem]")
-                    show(cur)
+                    with ui.row().classes("items-center gap-4"):
+                        for k, label in (("start", "First day"), ("end", "Last day")):
+                            with ui.input(label, value=pt.get(k) or f[k]).classes("w-44") as inp:
+                                with ui.menu().props("no-parent-event") as menu:
+                                    ui.date().bind_value(inp)
+                                with inp.add_slot("append"):
+                                    ui.icon("event").on("click", menu.open).classes("cursor-pointer").props(
+                                        'role=button tabindex=0 aria-hidden=false aria-label="Pick a date"').on(
+                                        "keydown.enter", menu.open)
+                            inp.on_value_change(lambda e, k=k, set_pt=set_pt: set_pt(e.value, k))
+                        if pt:
+                            ui.button("Same as all", icon="sync",
+                                      on_click=lambda x=x: (f.update(ptime={k_: v for k_, v in f["ptime"].items()
+                                                                            if k_ != x}),
+                                                            render_time_parts(), schedule_plan())).props(
+                                "flat dense no-caps size=sm").tooltip("use the common period above")
+                    show_warn()
+                    if f["freq"] != "none":
+                        stat_rows(d, names, stats_of(x))
+
+    def stat_rows(ds: dict, names: list[str], store: dict):
+        """A statistics picker per variable of ``names`` (time-dependent ones); choices go into ``store``."""
+        for name in names:
+            v = ds["vars"].get(name)
+            if v is None or v["kind"] == "static":
+                continue
+            cds = f["source"] == "cds"
+            cur = store.get(name) or ([] if cds else [v["default_stat"]])
+            with ui.row().classes("items-center gap-3"):
+                ui.label(name).classes("w-56 edh-mono" if cds else "w-20 edh-mono")
+                out = ui.label().classes("edh-muted text-caption edh-mono")
+
+                def show(vals, n=name, out=out, cds=cds):
+                    vals = vals or []
+                    if cds:
+                        out.text = ("Default: sum for accumulations, mean otherwise" if not vals else
+                                    "Output named after the GRIB field" + ("" if len(vals) == 1 else
+                                    ", " + ", ".join(f"…_{x}" for x in vals)))
+                        return
+                    out.text = "Output: " + (n if len(vals) == 1 else ", ".join(f"{n}_{x}" for x in vals))
+
+                def changed(e, n=name, show=show, store=store):
+                    store[n] = e.value
+                    show(e.value)
+                    schedule_plan()
+
+                ui.select(list(STATS), value=cur, multiple=True, on_change=changed).props(
+                    "dense outlined use-chips").classes("min-w-[18rem]")
+                show(cur)
 
     # ------------------------------------------------------------------ area map
     layers: list = []
+    ctx["proj"] = WORLD
+
+    def set_projection(p: dict | None):
+        """Draw the map in the projection of the dataset's grid (plate carrée for a latitude/longitude grid,
+        Lambert conformal for CERRA), with the outline of a regional domain."""
+        p = p or WORLD
+        if p == ctx["proj"]:
+            return
+        ctx["proj"] = p
+        ui.run_javascript(f"sksMap.set({area_map.id}, {json.dumps(p)})")
+        draw_rect()
 
     def set_bbox(w, s, e, n):
         f.update(west=w, south=s, east=e, north=n, mode="bbox")
@@ -1604,16 +1996,16 @@ def build_page(be, local: bool = False, embedded: bool = False):
             area_map.remove_layer(layer)
         layers.clear()
         style = {"color": PINK, "weight": 2, "fillColor": PINK, "fillOpacity": 0.12}
-        if f["mode"] == "global":
-            layers.append(area_map.generic_layer(name="rectangle", args=[[[-90, -180], [90, 180]], style]))
+        if f["mode"] == "global":  # everything the dataset has: its domain, or the globe
+            ring = ctx["proj"].get("outline") or box_outline(-90, -180, 90, 180)
+            layers.append(area_map.generic_layer(name="polygon", args=[ring, style]))
         elif f["mode"] == "bbox":
             try:
                 w, s, e, n = (float(f[k]) for k in ("west", "south", "east", "north"))
             except (TypeError, ValueError):
                 return
-            if e < w:
-                e += 360
-            layers.append(area_map.generic_layer(name="rectangle", args=[[[s, w], [n, e]], style]))
+            # sides divided: parallels and meridians are curves in a conic projection
+            layers.append(area_map.generic_layer(name="polygon", args=[box_outline(s, w, n, e), style]))
         elif f["mode"] == "points":
             try:
                 pts = parse_points(f["points"] or "")
@@ -1624,27 +2016,26 @@ def build_page(be, local: bool = False, embedded: bool = False):
                     "radius": 6, "color": PINK, "fillColor": PINK, "fillOpacity": 0.8, "weight": 2}]))
         center_map()
 
+    def fit_map(pts: list, padding: int, max_zoom: int):
+        ui.run_javascript(f"sksMap.fit({area_map.id}, {json.dumps(pts)}, {padding}, {max_zoom})")
+
     def center_map():
-        """Fit the map to the selection: the rectangle, the points, or the whole globe."""
+        """Fit the map to the selection: the rectangle, the points, or the dataset's domain (the globe)."""
         if f["mode"] == "global":
-            area_map.run_map_method("fitBounds", [[-75, -180], [80, 180]], {"padding": [10, 10]})
+            fit_map(ctx["proj"].get("outline") or [[-75, -180], [80, 180]], 10, 11)
         elif f["mode"] == "bbox":
             try:
                 w, s, e, n = (float(f[k]) for k in ("west", "south", "east", "north"))
             except (TypeError, ValueError):
                 return
-            if e < w:
-                e += 360
-            area_map.run_map_method("fitBounds", [[s, w], [n, e]], {"padding": [30, 30], "maxZoom": 8})
+            fit_map(box_outline(s, w, n, e, k=8), 30, 8)
         elif f["mode"] == "points":
             try:
                 pts = parse_points(f["points"] or "")
             except ValueError:
                 return
             if pts:
-                lats, lons = [p.lat for p in pts], [p.lon for p in pts]
-                area_map.run_map_method("fitBounds", [[min(lats), min(lons)], [max(lats), max(lons)]],
-                                        {"padding": [40, 40], "maxZoom": 7})
+                fit_map([[p.lat, p.lon] for p in pts], 40, 7)
 
     def on_draw(e):
         layer = e.args.get("layer", {})
@@ -1660,6 +2051,8 @@ def build_page(be, local: bool = False, embedded: bool = False):
         set_bbox(round(w, 2), round(max(-90, min(lats)), 2), round(ea, 2), round(min(90, max(lats)), 2))
 
     area_map.on("draw:created", on_draw)
+    # the first projection, once the page is connected (a dataset loaded meanwhile has already set its own)
+    later(lambda: (ui.run_javascript(f"sksMap.set({area_map.id}, {json.dumps(ctx['proj'])})"), center_map()))
 
     # ------------------------------------------------------------------ spec + plan
     async def pick_folder():
@@ -1745,6 +2138,9 @@ def build_page(be, local: bool = False, embedded: bool = False):
             f["hours"] = t_spec["hours"]
         if t_spec.get("tz_offset") is not None:
             f["tz_offset"] = t_spec["tz_offset"]
+        set_parts_from(JobSpec.from_dict(job))  # a combined store is extended with all its datasets
+        if f["dataset"] in ds_select.options and ds_select.value != f["dataset"]:
+            ds_select.value = f["dataset"]
         a_spec = job.get("area") or {}
         if a_spec.get("mode"):
             f["mode"] = a_spec["mode"]
@@ -1786,7 +2182,22 @@ def build_page(be, local: bool = False, embedded: bool = False):
         hourly = not cds or ((ctx.get("cds_desc") or {}).get("time") or {}).get("kind", "ymd") == "ymd"
         start_hour = int(f["start_hour"] or 0) if hourly else 0
         end_hour = int(23 if f["end_hour"] is None else f["end_hour"]) if hourly else 23
+        parts = []
+        if multi() and not cds:  # several datasets into one store (the backend tidies and checks them)
+            for x, d in datasets_on():
+                names = sel_of(x)
+                if not names:
+                    continue
+                lv = d.get("levels")
+                levels = ([v for v in f["levels"] if v in lv] or list(f["levels"])) if lv and f["levels"] else None
+                info = (ctx["info"] if x == f["dataset"] else ctx["xinfo"].get(x)) or {}
+                pt = f["ptime"].get(x, {})
+                parts.append(PartSpec(dataset=x, collection=info.get("collection") or f["collection"],
+                                      dataset_url=info.get("url"), variables=list(names), levels=levels,
+                                      stats={k: v for k, v in stats_of(x).items() if k in names and v},
+                                      start=pt.get("start"), end=pt.get("end")))
         return JobSpec(
+            parts=parts,
             source=f["source"],
             dataset=f["dataset"], collection=f["collection"], dataset_url=None if cds else info.get("url"),
             variables=list(f["variables"]),
@@ -1876,6 +2287,17 @@ def build_page(be, local: bool = False, embedded: bool = False):
                 ui.label("Select a dataset to see the plan.").classes("edh-muted")
                 block_launch("Select a dataset first.")
                 return
+            if f["source"] == "edh" and f["extra"]:
+                bad = [x for x in f["extra"] if compat_problem(x)]
+                if bad:
+                    msg = f"{title_of(bad[0])} cannot share this store: {compat_problem(bad[0])}. Remove it in Dataset."
+                    ui.label(msg).classes("text-negative")
+                    block_launch(msg)
+                    return
+                if any(x not in ctx["dss"] for x in f["extra"]):
+                    ui.label("Loading the added datasets…").classes("edh-muted")
+                    block_launch(planning=True)
+                    return
             try:
                 spec_ = build_spec()
                 res = await be.call("plan", spec=spec_.to_dict(), connections=int(f["connections"] or 1),
@@ -2083,7 +2505,12 @@ def build_page(be, local: bool = False, embedded: bool = False):
             kv("Grid", " × ".join(map(str, s["space"])) + (" points" if f["mode"] == "points" else ""))
             if s["levels"]:
                 kv("Levels", ", ".join(map(str, s["levels"])))
-            kv("Outputs", ", ".join(s["outputs"]))
+            for part in plan.get("parts") or []:
+                own = (f" · {part['first'][:10]} → {part['last'][:10]}"
+                       if part.get("first") and (part["first"], part["last"]) != (s["first"], s["last"]) else "")
+                kv(part["dataset"], f"{', '.join(part['outputs'])} · {part['requests']:,} requests{own}")
+            if not plan.get("parts"):
+                kv("Outputs", ", ".join(s["outputs"]))
             kv("Chunks", chunking.TITLES[plan["layout"]] + (" (recommended)" if plan["layout"] == rec_of()[0] else ""))
             for w in s["warnings"]:
                 with ui.row().classes("items-start gap-2 no-wrap"):
@@ -2584,7 +3011,10 @@ def build_page(be, local: bool = False, embedded: bool = False):
         if not spec:
             return "job definition unreadable"
         tt = spec.get("time") or {}
-        return (f"{spec.get('dataset')} · {', '.join(spec.get('variables') or [])} · {tt.get('start')} → {tt.get('end')}"
+        parts = [p for p in spec.get("parts") or [] if isinstance(p, dict)]
+        what = (" + ".join(f"{p.get('dataset')} ({', '.join(p.get('variables') or [])})" for p in parts) if parts
+                else f"{spec.get('dataset')} · {', '.join(spec.get('variables') or [])}")
+        return (f"{what} · {tt.get('start')} → {tt.get('end')}"
                 + ("" if tt.get("freq") in (None, "none") else f" · {FREQS.get(tt['freq'], tt['freq'])}"))
 
     def _job_header(fo: Fold, s):
@@ -2604,6 +3034,17 @@ def build_page(be, local: bool = False, embedded: bool = False):
                 if spec:
                     dataset_image(s.get("_thumb"), "", "edh-thumb-md")  # the caption beside it names the dataset
                 ui.label(_job_line(spec)).classes("edh-muted text-caption grow min-w-0 break-words")
+            who = _job_people(s)
+            if who:
+                with ui.row().classes("items-center gap-1"):
+                    ui.icon("group" if not s.get("mine", True) else "person", size="xs", color="grey-6")
+                    ui.label(who).classes("edh-muted text-caption")
+            tk = s.get("takeover")
+            if tk:
+                ui.label(f"Taking over with key '{tk.get('key')}' failed: {tk['error']}" if tk.get("error") else
+                         f"Taking over with key '{tk.get('key')}': waiting for the job to pause after its current "
+                         f"unit, then it resumes here. Keep the app open until then.").classes(
+                    "text-caption " + ("text-negative" if tk.get("error") else "text-warning"))
             live = ui.column().classes("w-full gap-2")
             with live:
                 _job_live(s)
@@ -2613,6 +3054,10 @@ def build_page(be, local: bool = False, embedded: bool = False):
             src = _struct_src(s)
             with ui.row().classes("edh-job-actions w-full gap-2 items-center justify-between"):
                 with ui.row().classes("gap-2 items-center"):  # what this state calls for
+                    if s.get("alive") and (not s.get("mine", True) or st == "waiting_quota") and not s.get("takeover"):
+                        ui.button("Take over", icon="swap_horiz", on_click=lambda s=s: choose_key(s, takeover=True)).props(
+                            "unelevated no-caps").classes("edh-primary-btn").tooltip(
+                            "pause this job and continue it with one of your keys (e.g. its key is out of requests)")
                     if s.get("alive"):
                         ui.button("Pause", icon="pause", on_click=lambda d=d: act(
                             "job_stop", "pausing after the current unit", jid=d, action="pause")).props(
@@ -2622,7 +3067,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
                             lambda d=d: act("job_stop", "cancelling", jid=d, action="cancel"),
                             yes="Cancel job", no="Keep running", danger=True)).props("flat no-caps color=negative")
                     elif st not in ("completed", "unreadable"):
-                        resume = ui.button("Resume", icon="play_arrow", on_click=lambda d=d: _resume(d))
+                        resume = ui.button("Resume", icon="play_arrow", on_click=lambda s=s: _resume(s))
                         if st == "failed":  # the note says what to fix first; retrying is not the loudest thing here
                             resume.props("outline no-caps color=primary")
                         else:
@@ -2685,8 +3130,143 @@ def build_page(be, local: bool = False, embedded: bool = False):
             ui.notify(msg, type="positive")
         await refresh_jobs()
 
-    def _resume(d):
-        return act("job_resume", "job resumed", jid=d)
+    def _job_people(s) -> str:
+        """Who started the job and who runs it, when that is someone else (shared jobs folder)."""
+        me = (ctx.get("jobs_folder") or {}).get("user")
+        by, run = s.get("created_by"), s.get("run_by")
+        if not by and not run:
+            return ""
+        if by == me and run in (None, me) and not (ctx.get("jobs_folder") or {}).get("shared"):
+            return ""
+        out = f"started by {'you' if by == me else by}" if by else ""
+        if run and run != by:
+            out += f"{' · ' if out else ''}{'running' if s.get('alive') else 'last run'} by {'you' if run == me else run}"
+        return out
+
+    def _my_keys(source: str) -> list[str]:
+        return [k["name"] for k in (ctx.get("keys") or {}).get("keys", []) if k.get("provider", "edh") == source]
+
+    def _resume(s):
+        """Resume; asks which key when there is a choice to make: the job is a colleague's, it stopped on its
+        quota, or this account has several keys for its source."""
+        spec = s.get("spec") or {}
+        names = _my_keys(spec.get("source") or "edh")
+        own = (spec.get("download") or {}).get("key")
+        if not s.get("mine", True) or s.get("status") == "paused_quota" or len(names) > 1 or (
+                names and own not in names):
+            return choose_key(s)
+        return act("job_resume", "job resumed", jid=s["id"])
+
+    def choose_key(s, takeover: bool = False):
+        spec = s.get("spec") or {}
+        src = spec.get("source") or "edh"
+        names = _my_keys(src)
+        if not names:
+            ui.notify("add an API key for this source in the Keys tab first", type="warning")
+            return
+        own = (spec.get("download") or {}).get("key")
+        default = ((ctx.get("keys") or {}).get("defaults") or {}).get(src) or (ctx.get("keys") or {}).get("default")
+        pick = {"key": own if own in names and s.get("mine", True) and s.get("status") != "paused_quota"
+                else default if default in names else names[0]}
+        with dialog_host, ui.dialog() as dlg, ui.card().classes("edh-card gap-3").style("width:min(520px,94vw)"):
+            ui.label("Take over the job" if takeover else "Resume with which key?").classes("text-subtitle1 text-weight-medium")
+            who = _job_people(s)
+            ui.label((f"{s['id']}{' · ' + who if who else ''}")).classes("edh-muted text-caption break-all")
+            if takeover:
+                ui.label("The job pauses after the unit it is processing, then resumes under your account with the "
+                         "key below. Nothing downloaded so far is lost. Keep the app open until it has resumed."
+                         ).classes("text-body2")
+            elif not s.get("mine", True):
+                ui.label("A colleague started this job. It continues under your account, with your key: the "
+                         "requests count on your quota.").classes("text-body2")
+            ui.select({n: n for n in names}, label="Your key").bind_value(pick, "key").classes("w-full")
+
+            async def go():
+                dlg.close()
+                if takeover:
+                    await act("job_takeover", "pausing the job: it resumes with your key when it has stopped",
+                              jid=s["id"], key=pick["key"])
+                else:
+                    await act("job_resume", f"job resumed with key '{pick['key']}'", jid=s["id"], key=pick["key"])
+
+            with ui.row().classes("justify-end w-full gap-2"):
+                ui.button("Cancel", on_click=dlg.close).props("flat no-caps")
+                ui.button("Take over" if takeover else "Resume", on_click=go).props("unelevated no-caps").classes(
+                    "edh-primary-btn")
+        dlg.open()
+
+    async def refresh_jobs_folder():
+        d = await call("jobs_folder")
+        if d is None:
+            return
+        ctx["jobs_folder"] = d
+        jobs_folder_label.text = f"{d['path']} · " + ("shared with other accounts" if d["shared"] else "private")
+        jobs_folder_icon.props(f'name={"folder_shared" if d["shared"] else "folder"}')
+
+    async def edit_jobs_folder():
+        cur = ctx.get("jobs_folder") or {}
+        val = {"path": cur.get("path") if cur.get("shared") else ""}
+        with dialog_host, ui.dialog() as dlg, ui.card().classes("edh-card gap-3").style("width:min(560px,94vw)"):
+            ui.label("Jobs folder").classes("text-subtitle1 text-weight-medium")
+            ui.markdown("Colleagues who log in to this server with their own account see the same jobs when "
+                        "everyone uses the same folder, and can resume one with their own key (e.g. when its key "
+                        "has no requests left). Use a folder your group can write, e.g. `/srv/sks-dl/jobs`. "
+                        "Empty: your private folder. A server admin can set it for everyone in "
+                        "`/etc/sks-dl/config.json` (`{\"jobs_dir\": \"/srv/sks-dl/jobs\"}`).").classes("text-body2")
+            ui.input("Shared jobs folder (on the server)", placeholder="/srv/sks-dl/jobs").bind_value(
+                val, "path").classes("w-full")
+            ui.label("Jobs already in the current folder stay there.").classes("edh-muted text-caption")
+
+            async def save():
+                d = await call("jobs_folder_set", path=val["path"])
+                if d is None:
+                    return
+                dlg.close()
+                await refresh_jobs_folder()
+                cards.clear()
+                jobs_box.clear()
+                await refresh_jobs()
+
+            with ui.row().classes("justify-end w-full gap-2"):
+                ui.button("Cancel", on_click=dlg.close).props("flat no-caps")
+                ui.button("Save", on_click=save).props("unelevated no-caps").classes("edh-primary-btn")
+        dlg.open()
+
+    async def check_folder():
+        path = (f.get("directory") or "").strip()
+        if not path:
+            ui.notify("enter a directory first", type="warning")
+            return
+        n = ui.notification(f"checking {path}…", spinner=True, timeout=None)
+        try:
+            r = await be.call("folder_check", path=path)
+        except BackendError as e:
+            ui.notify(str(e), type="negative")
+            return
+        finally:
+            n.dismiss()
+        with dialog_host, ui.dialog() as dlg, ui.card().classes("edh-card gap-2").style("width:min(560px,94vw)"):
+            with ui.row().classes("items-center gap-2 no-wrap"):
+                ui.icon("check_circle" if r["ok"] else "error_outline", color="positive" if r["ok"] else "negative")
+                ui.label("Jobs can write here" if r["ok"] else "This folder has a problem").classes(
+                    "text-subtitle1 text-weight-medium")
+            ui.label(r["path"]).classes("edh-mono text-caption edh-muted break-all")
+            if r.get("fs"):
+                kind = "network folder" if r.get("network") else "local disk"
+                ui.label(f"{kind}: {r['fs']} mounted at {r.get('mount')}"
+                         + (f" from {r['source']}" if r.get("network") else "")).classes("text-caption break-all")
+            for c in r["checks"]:
+                with ui.row().classes("items-start gap-2 no-wrap"):
+                    ui.icon("check" if c["ok"] else "close", color="positive" if c["ok"] else "negative", size="xs")
+                    ui.label(c["name"] + (f": {c['detail']}" if c.get("detail") else "")).classes(
+                        "text-body2 break-words")
+            if r.get("network"):
+                ui.label("Temporary chunks go to <folder>/tmp by default, so on the network folder too. For speed "
+                         "you can put them on a local disk in Download settings → Temporary directory.").classes(
+                    "edh-muted text-caption")
+            with ui.row().classes("justify-end w-full"):
+                ui.button("Close", on_click=dlg.close).props("flat no-caps")
+        dlg.open()
 
     def confirm(text, action, yes="Yes", no="No", danger=False):
         with dialog_host, ui.dialog() as dlg, ui.card().classes("edh-card").style("width:min(480px,94vw)"):
@@ -2727,6 +3307,26 @@ def build_page(be, local: bool = False, embedded: bool = False):
             dlg.on("hide", lambda: t.cancel())
         dlg.open()
 
+    def set_parts_from(spec_: JobSpec):
+        """A combined job's datasets back in the form: the first is the main dataset, the others are added."""
+        ps = spec_.parts
+        if not ps:
+            f.update(extra=[], xvars={}, xstats={}, ptime={})
+        else:
+            m = ps[0]
+            lv = []
+            for p in ps:
+                lv += [v for v in p.levels or [] if v not in lv]
+            f.update(collection=m.collection, dataset=m.dataset, variables=list(m.variables), levels=lv,
+                     stats=dict(m.stats), extra=[p.dataset for p in ps[1:]],
+                     xvars={p.dataset: list(p.variables) for p in ps[1:]},
+                     xstats={p.dataset: dict(p.stats) for p in ps[1:]},
+                     ptime={p.dataset: {k: getattr(p, k) for k in ("start", "end") if getattr(p, k)}
+                            for p in ps if p.start or p.end})
+        set_extra_options()
+        render_extras()
+        later(load_extras)
+
     def clone(sp: dict):
         spec_ = JobSpec.from_dict(sp)
         t, a, o, dl = spec_.time, spec_.area, spec_.output, spec_.download
@@ -2760,8 +3360,9 @@ def build_page(be, local: bool = False, embedded: bool = False):
         if src == "cds":
             f["levels"] = [f"{x:g}" for x in (spec_.levels or [])]
             f["chunk_layout"] = o.chunk_layout if o.chunk_layout in ("auto", "timeseries", "maps") else "auto"
-        coll_select.value = spec_.collection
-        ds_select.value = spec_.dataset
+        set_parts_from(spec_)
+        coll_select.value = f["collection"]
+        ds_select.value = f["dataset"]
         tabs.set_value(t_new)
         apply_source_ui()
         if switched:
@@ -2773,6 +3374,7 @@ def build_page(be, local: bool = False, embedded: bool = False):
     ui.timer(3.0, lambda: refresh_jobs() if tabs.value in (t_jobs, "Jobs") else None)
     tabs.on_value_change(lambda e: refresh_jobs() if e.value in (t_jobs, "Jobs") else
                          refresh_key_list() if e.value in (t_keys, "Keys") else None)
+    ui.timer(0.5, refresh_jobs_folder, once=True)
 
     # ------------------------------------------------------------------ keys tab
     async def sources_meta() -> list[dict]:
@@ -2991,7 +3593,7 @@ def _int(v):
         return None
 
 
-_WATCHED = ("start", "end", "start_hour", "end_hour", "freq", "hours", "tz_offset", "mode", "west", "south", "east", "north", "points",
+_WATCHED = ("extra", "start", "end", "start_hour", "end_hour", "freq", "hours", "tz_offset", "mode", "west", "south", "east", "north", "points",
             "lon_convention", "directory", "name", "out_format", "target_mode", "target_store", "extend_direction", "keepbits", "lossless", "chunk_layout",
             "chunk_time", "chunk_lat", "chunk_lon", "chunk_points", "dtype", "compressor", "clevel", "shuffle",
             "sharding", "shard_auto", "shard_time", "shard_space", "extra_attrs", "connections",
@@ -3005,8 +3607,8 @@ def _watch_form(f, ctx, schedule_plan, render_stats, draw_rect):
     if snap != last:
         ctx["_snap"] = snap
         if last is not None:
-            if snap["freq"] != last["freq"]:
-                render_stats()
+            if any(snap[k] != last[k] for k in ("freq", "start", "end", "extra")):
+                render_stats()  # and the datasets' own periods, which show the common one by default
             if any(snap[k] != last[k] for k in ("mode", "west", "south", "east", "north", "points")):
                 draw_rect()
             schedule_plan()

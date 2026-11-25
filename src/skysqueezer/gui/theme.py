@@ -82,6 +82,10 @@ html, body {{ background: var(--edh-bg) !important; color: var(--edh-text); font
 
 /* typography */
 .edh-title {{ font-size: var(--edh-fs-lg); font-weight: 500; }}
+.edh-update-notes {{ background: var(--edh-surface-2); border-radius: var(--edh-r); padding: 8px 14px; max-height: 40vh; overflow-y: auto; }}
+.edh-update-notes .nicegui-markdown > :first-child {{ margin-top: 0; }} .edh-update-notes .nicegui-markdown > :last-child {{ margin-bottom: 0; }}
+.edh-update-notes h1, .edh-update-notes h2, .edh-update-notes h3, .edh-update-notes h4 {{ font-size: var(--edh-fs-sm); font-weight: 600; line-height: 1.4; letter-spacing: normal; margin: .8em 0 .2em; }}
+.edh-update-notes ul {{ margin: .2em 0; padding-left: 1.2em; }}
 .edh-subtitle {{ font-size: var(--edh-fs-md); font-weight: 500; }}
 .edh-muted {{ color: var(--edh-muted) !important; }}
 .edh-mono {{ font-family: 'Roboto Mono', monospace; }}
@@ -89,6 +93,8 @@ html, body {{ background: var(--edh-bg) !important; color: var(--edh-text); font
 .edh-kpi-label {{ font-size: var(--edh-fs-xs); color: var(--edh-muted); }}
 .edh-kpi-value {{ font-size: var(--edh-fs-lg); font-weight: 500; line-height: 1.3; }}
 .edh-tip {{ color: var(--edh-muted); }}
+.edh-param-desc p {{ margin: 0 0 0.7em; line-height: 1.5; }}
+.edh-param-desc a {{ color: var(--q-primary); }}
 .edh-tip:hover {{ color: var(--edh-text); }}
 .edh-tooltip {{ max-width: 340px; font-size: var(--edh-fs-xs) !important; line-height: 1.35; background: var(--edh-surface-2) !important; color: var(--edh-text); }}
 a {{ color: var(--edh-accent-text); }}
@@ -150,7 +156,6 @@ a {{ color: var(--edh-accent-text); }}
 .edh-expansion {{ border-radius: var(--edh-r); overflow: hidden; background: var(--edh-surface-2); }}
 .edh-map {{ border-radius: var(--edh-r); overflow: hidden; }}
 .leaflet-container {{ background: var(--edh-bg) !important; }}
-.edh-map .leaflet-tile-pane {{ filter: invert(1) hue-rotate(200deg) brightness(.78) contrast(.92) saturate(.6); }}
 .leaflet-bar a, .leaflet-draw-toolbar a {{ background-color: var(--edh-surface-2) !important; color: var(--edh-text) !important; border-color: var(--edh-surface) !important; }}
 .leaflet-draw-toolbar a {{ background-color: var(--edh-surface-2) !important; }}
 .leaflet-control-attribution {{ background: var(--edh-surface) !important; color: var(--edh-muted) !important; }}

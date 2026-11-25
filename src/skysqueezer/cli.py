@@ -22,6 +22,9 @@ def cmd_worker(a):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="sks-dl", description="SkySqueezer: weather and climate dataset downloader")
     from . import __version__
+    from .paths import share_files
+
+    share_files()  # a shared jobs folder: what this process writes there stays writable for the group
 
     ap.add_argument("--version", action="version", version=f"sks-dl {__version__}")
     ap.add_argument("--no-update", action="store_true", help="do not check for a newer release at start")
@@ -201,6 +204,22 @@ def main(argv=None):
                       + (f"  cost {q['cost']:g}" if q["cost"] is not None else "")
                       + (f"  ~{q['bytes_est'] / 1e9:.2f} GB" if q["bytes_est"] else ""))
             return
+        if spec.parts:  # several datasets into one store
+            from . import service
+
+            r = service.plan(spec.to_dict(), spec.download.connections, follow=False)
+            if not r["ok"]:
+                sys.exit(f"cannot plan: {r['error']}")
+            s = {k: v for k, v in r["summary"].items()
+                 if k not in ("download_bytes_est", "output_bytes_uncompressed", "raw_bytes", "eta_s", "parts")}
+            est = r["est"]
+            s["download"] = human_bytes(est["download"]) + ("" if est["download_measured"] else " (estimate)")
+            s["zarr_size"] = human_bytes(est["zarr"]) + ("" if est["zarr_measured"] else " (estimate)")
+            s["uncompressed"] = human_bytes(est["raw"])
+            _p(s)
+            for part in r["parts"]:
+                print(f"  {part['dataset']}: {', '.join(part['outputs'])} ({part['requests']:,} requests)")
+            return
         key = keys.get_key(spec.download.key, sources.require_jobs(spec.source).id)
         info = catalog.dataset_info(spec)
         ds = catalog.load_dataset(info["url"], key.secret, counter=RequestCounter(key.fingerprint), info=info)
@@ -233,6 +252,14 @@ def main(argv=None):
 
         spec = JobSpec.load(a.job_file)
         sources.require_jobs(spec.source)
+        if spec.parts:  # name clashes resolved and the datasets checked before anything is downloaded
+            from . import service, store
+
+            service._combined(spec)
+            if spec.parts:
+                why = store.parts_compatible(service._part_plans(spec))
+                if why:
+                    sys.exit(f"these datasets cannot share one store: {why}")
         job = runner.create_job(spec)
         print(f"job {job.name}")
         if a.detach:

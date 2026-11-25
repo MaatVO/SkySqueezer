@@ -57,6 +57,11 @@ class Unit:
 
 
 class Plan:
+    # combined stores: the store's time axis (all datasets' periods) and where this plan's periods start in it.
+    # None/0 for a plain job: the store's axis is the plan's own.
+    axis_labels: pd.DatetimeIndex | None = None
+    axis_offset: int = 0
+
     def __init__(self, spec: JobSpec, ds: Dataset):
         self.spec = spec
         self.ds = ds
@@ -88,7 +93,8 @@ class Plan:
                 bad = [s for s in stats if s not in STATS]
                 if bad:
                     raise PlanError(f"unknown statistic {bad} for {name}")
-            out_names = [name] if len(stats) == 1 else [f"{name}_{s}" for s in stats]
+            base = spec.rename.get(name) or name  # combined jobs: a name another dataset already uses
+            out_names = [base] if len(stats) == 1 else [f"{base}_{s}" for s in stats]
             level_idx = []
             if v.kind == "level":
                 levels = ds.levels.tolist()
@@ -295,11 +301,20 @@ class Plan:
     def n_periods(self) -> int:
         return len(self.labels)
 
+    @property
+    def out_labels(self) -> pd.DatetimeIndex:
+        """The time axis of the store: the plan's own, or the shared one of a combined store."""
+        return self.labels if self.axis_labels is None else self.axis_labels
+
+    @property
+    def out_periods(self) -> int:
+        return len(self.out_labels)
+
     def out_shape(self, vp: VarPlan) -> tuple:
         lev = (len(self.level_values),) if vp.var.kind == "level" else ()
         if vp.var.kind == "static":
             return self.shape_space
-        return (self.n_periods, *lev, *self.shape_space)
+        return (self.out_periods, *lev, *self.shape_space)
 
     def out_dims(self, vp: VarPlan) -> tuple:
         space = ("point",) if self.points is not None else ("latitude", "longitude")
@@ -350,3 +365,53 @@ class Plan:
             "eta_s": dl / throughput if throughput else None,
         }
         return d
+
+
+def combined_summary(plans: list[Plan]) -> dict:
+    """One plan summary for the parts of a combined job (the job card reads it as for one dataset)."""
+    ss = [p.summary() for p in plans]
+    first = ss[0]
+    lab = plans[0].out_labels
+    return {**first,
+            "periods": len(lab),
+            "first": str(lab[0]) if len(lab) else None,
+            "last": str(lab[-1]) if len(lab) else None,
+            "requests": sum(x["requests"] for x in ss),
+            "download_bytes_est": sum(x["download_bytes_est"] for x in ss),
+            "raw_bytes": sum(x["raw_bytes"] for x in ss),
+            "output_bytes_uncompressed": sum(x["output_bytes_uncompressed"] for x in ss),
+            "units": sum(x["units"] for x in ss),
+            "levels": next((x["levels"] for x in ss if x["levels"]), None),
+            "outputs": [n for x in ss for n in x["outputs"]],
+            "warnings": [w for x in ss for w in x["warnings"]],
+            "eta_s": None,
+            "parts": [{"dataset": p.spec.dataset, **{k: x[k] for k in ("requests", "download_bytes_est", "units",
+                                                                      "outputs", "first", "last", "periods")},
+                       "available": [str(t) for t in p.ds.time_range] if p.ds.time_range else None}
+                      for p, x in zip(plans, ss)]}
+
+
+def align_parts(plans: list[Plan]) -> str | None:
+    """One time axis for the parts of a combined store: every period of every part, in order. Each plan learns
+    the axis and where its own periods start in it (a dataset that starts later, or ends earlier, leaves its
+    steps outside its data empty). Returns why the parts cannot share an axis (None when they can): their
+    periods must line up (same time step) and leave no gap."""
+    timed = [p for p in plans if p.n_periods]
+    if not timed:
+        return None
+    axis = pd.DatetimeIndex(sorted(set().union(*(set(p.labels) for p in timed))))
+    steps = [np.diff(p.labels.values).max() for p in timed if p.n_periods > 1]
+    if steps and len(axis) > 1 and np.diff(axis.values).max() > max(steps):
+        gap = int(np.argmax(np.diff(axis.values)))
+        return (f"the periods leave a gap ({axis[gap]} to {axis[gap + 1]}): make the datasets' periods overlap "
+                f"or touch")
+    for p in plans:
+        p.axis_labels = axis
+        if not p.n_periods:
+            continue
+        k = int(axis.get_loc(p.labels[0]))
+        if k + p.n_periods > len(axis) or not (axis[k:k + p.n_periods] == p.labels).all():
+            return (f"{p.spec.dataset} has a different time step than the other datasets: choose a common time "
+                    f"step (e.g. daily) in Time")
+        p.axis_offset = k
+    return None

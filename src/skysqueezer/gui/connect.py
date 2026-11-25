@@ -184,33 +184,40 @@ def build_connect_page():
                 ui.notify(f"connection to {sess.server.name} closed; download jobs keep running there. "
                           "Connect again to see them.", type="warning", timeout=0, close_button=True)
                 asyncio.create_task(close(sid))
-        if update.AVAILABLE and not STATE.get("update_asked"):  # found at start-up: ask once, in this window
-            STATE["update_asked"] = True
-            ask_update(update.AVAILABLE)
+
+    async def check_update():
+        """Each time the app opens: a newer release is offered (GitHub is asked again, see update.check)."""
+        info = await run.io_bound(update.check)
+        if info:
+            ask_update(info)
 
     def ask_update(info):
-        """A newer release: nothing is downloaded until the user says yes."""
+        """A newer release: what is new, and update yes or no. Nothing is downloaded until the user says yes."""
         new = info["version"]
-        with dialogs, ui.dialog() as dlg, ui.card().classes("edh-card gap-3").style("width:min(480px,94vw)"):
+        with dialogs, ui.dialog() as dlg, ui.card().classes("edh-card gap-3").style("width:min(520px,94vw)"):
             ui.label(f"Update to SkySqueezer {new}?").classes("edh-title").props("role=heading aria-level=2")
-            ui.markdown(f"You have {display_version(__version__)}. The update comes from the project's GitHub "
-                        "releases and is checked against its checksum before it replaces this program. **It "
-                        "starts next time you open the app**; download jobs, here and on servers, keep running."
-                        ).classes("text-body2")
-            if info.get("page", "").startswith("https://"):
-                ui.link("What's new", info["page"], new_tab=True).classes("text-body2")
+            ui.label(f"You have {display_version(__version__)}.").classes("text-body2 edh-muted")
+            notes, cut = update.notes_excerpt(info.get("notes", ""))
+            page = info.get("page", "") if info.get("page", "").startswith("https://") else ""
+            if notes and not notes.startswith("#"):  # notes that open with their own heading need no label
+                ui.label("What's new").classes("text-body2 text-weight-medium")
+            if notes:
+                with ui.element("div").classes("edh-update-notes w-full"):
+                    ui.markdown(notes).classes("text-body2")
+            if page and (cut or not notes):
+                ui.link("All release notes" if notes else "What's new", page, new_tab=True).classes("text-body2")
+            ui.label("The update comes from the project's GitHub releases and is checked against its checksum "
+                     "before it replaces this program. It starts next time you open the app; download jobs, here "
+                     "and on servers, keep running.").classes("text-caption edh-muted")
             note = ui.label().classes("text-caption").props("role=status")
             note.set_visibility(False)
-            with ui.row().classes("w-full items-center justify-between gap-2"):
-                skip = ui.button("Skip this version", on_click=lambda: (update.skip(new), dlg.close())).props(
-                    "flat no-caps color=grey-5")
-                with ui.row().classes("items-center gap-2"):
-                    later_ = ui.button("Not now", on_click=dlg.close).props("flat no-caps")
-                    yes = ui.button("Download update", icon="system_update_alt").props(
-                        "unelevated no-caps").classes("edh-primary-btn")
+            with ui.row().classes("w-full items-center justify-end gap-2"):
+                no = ui.button("Not now", on_click=dlg.close).props("flat no-caps")
+                yes = ui.button("Update", icon="system_update_alt").props(
+                    "unelevated no-caps").classes("edh-primary-btn")
 
             async def go():
-                for b in (skip, later_, yes):
+                for b in (no, yes):
                     b.disable()
                 yes.props("loading")
                 note.classes(replace="text-caption edh-muted")
@@ -221,7 +228,7 @@ def build_connect_page():
                 except Exception as e:  # offline, read-only folder, checksum …: this version keeps working
                     yes.props(remove="loading")
                     yes.text = "Try again"
-                    for b in (skip, later_, yes):
+                    for b in (no, yes):
                         b.enable()
                     note.classes(replace="text-caption text-negative")
                     note.text = f"The update failed: {e}. This version keeps working."
@@ -235,6 +242,7 @@ def build_connect_page():
         dlg.open()
 
     ui.timer(2.0, watch)
+    ui.timer(1.0, check_update, once=True)  # once the page is connected
     select(STATE["active"])
 
     # ---- guided tour: this page explains connecting; the app tab opened next explains the rest

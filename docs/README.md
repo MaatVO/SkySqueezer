@@ -18,6 +18,7 @@ fetch it, a shared processor writes it to Icechunk, and an export produces the f
 | [Climate Data Store pipeline](climate-data-store.md) | Dataset forms, request packing, the request ledger, the adaptive queue, GRIB and NetCDF |
 | [Storage](storage.md) | Icechunk commits, the Zarr export, chunk layouts, compression, extending a store |
 | [Remote use over SSH](remote.md) | Connecting to a server, the agent, the code bundle, the launcher |
+| [A server shared by a team](shared-server.md) | Shared jobs across accounts, resuming with your own key, writing to a NAS |
 | [Keys and quota](keys-and-quota.md) | Where API keys come from, how they are kept secret, Earth Data Hub request accounting |
 | [Releases and self-update](releases.md) | The CI build, release numbering, and how the executable updates itself |
 

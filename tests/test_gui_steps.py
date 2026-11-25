@@ -52,3 +52,16 @@ def test_dataset_states_follow_loading():
 def test_cds_grid_and_points_are_summed_up():
     s = states(grid="0.5", mode="points", points="trento, 46.07, 11.12\nbolzano, 46.5, 11.35")
     assert s[4] == ("done", "2 points · grid 0.5°")
+
+
+def test_steps_name_every_dataset_of_a_combined_store():
+    from skysqueezer.gui.steps import dataset_step, variables_step
+
+    f = {"source": "edh", "dataset": "era5-single-levels-atmosphere", "variables": ["msl"],
+         "extra": ["era5-pressure-levels"], "xvars": {"era5-pressure-levels": ["t", "z"]}, "levels": [850]}
+    state, line = dataset_step(f, "ERA5 single levels", True, False, True)
+    assert state == "done" and line.endswith("ERA5 single levels + era5-pressure-levels")
+    state, line = variables_step(f)
+    assert state == "done" and line.startswith("3 variables")
+    f["source"] = "cds"  # combining is Earth Data Hub only: the added datasets are not counted
+    assert variables_step(f)[1].startswith("1 variable")

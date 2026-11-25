@@ -58,6 +58,92 @@ def create_repo(path: Path, plan: Plan, job_id: str) -> ic.Repository:
     return repo
 
 
+def parts_compatible(plans: list[Plan]) -> str | None:
+    """Why the parts of a combined job cannot share one store (None when they can): every part must give the same
+    time axis and grid, levels of one vertical coordinate must agree, and no two outputs may share a name."""
+    if not plans:
+        return "no datasets selected"
+    from .planner import align_parts
+
+    why = align_parts(plans)
+    if why:
+        return why
+    first = plans[0]
+    seen: dict[str, str] = {}
+    levels: dict[str, tuple[list, str]] = {}
+    for p in plans:
+        name = p.spec.dataset
+        if p is not first:
+            if (p.points is None) != (first.points is None) or (
+                    p.points is not None and len(p.points) != len(first.points)):
+                return f"{name}: the area differs from {first.spec.dataset}"
+            for coord in ("out_lat", "out_lon"):
+                a, b = np.asarray(getattr(p, coord), "f8"), np.asarray(getattr(first, coord), "f8")
+                if a.shape != b.shape or not np.allclose(a, b, equal_nan=True):
+                    return (f"{name} is on a different grid than {first.spec.dataset} ({a.size} vs {b.size} "
+                            f"{coord[4:]}itudes): only datasets on the same grid can be combined (ERA5 single "
+                            f"and pressure levels can; ERA5-Land cannot be combined with ERA5)")
+        if p.has_levels:
+            dim = p.ds.meta.level_dim
+            have = levels.get(dim)
+            if have is None:
+                levels[dim] = (list(p.level_values), name)
+            elif [float(x) for x in have[0]] != [float(x) for x in p.level_values]:
+                return (f"{name} and {have[1]} both have {dim} but with different levels: select the same "
+                        f"levels in both")
+        for vp in p.vars:
+            for n in vp.out_names:
+                if n in seen:
+                    return f"output {n!r} comes from both {seen[n]} and {name}"
+                seen[n] = name
+    return None
+
+
+def parts_added(repo: ic.Repository, job_id: str) -> list[int]:
+    """The parts of a combined job whose arrays are already in the repository."""
+    g = zarr.open_group(repo.readonly_session("main").store, mode="r")
+    return list((g.attrs.get("edh_parts_added") or {}).get(job_id) or [])
+
+
+def add_part(repo: ic.Repository, plan: Plan, job_id: str, index: int) -> None:
+    """Create the arrays of part ``index`` of a combined job in its repository (the first part made the
+    coordinates). Recorded in the same commit, so a resumed job adds a part once."""
+    if index in parts_added(repo, job_id):
+        return
+    s = repo.writable_session("main")
+    g = zarr.open_group(s.store, mode="r+")
+    if plan.has_levels:
+        name = plan.ds.meta.level_dim
+        if name not in g:
+            _write_level_coord(g, plan)
+        elif not np.array_equal(np.asarray(g[name][:], "f8"), np.asarray(plan.level_values, "f8")):
+            raise Fatal(f"{plan.spec.dataset}: its {name} levels differ from those already in the store")
+    clash = [n for vp in plan.vars for n in vp.out_names if n in g]
+    if clash:
+        raise Fatal(f"{plan.spec.dataset}: the store already has {', '.join(clash)}")
+    _write_vars(g, plan)
+    done = dict(g.attrs.get("edh_parts_added") or {})
+    done[job_id] = sorted({*done.get(job_id, []), index})
+    g.attrs["edh_parts_added"] = done
+    s.commit(f"add {plan.spec.dataset} ({', '.join(n for vp in plan.vars for n in vp.out_names)})")
+
+
+def combined_attrs(plans: list[Plan], spec) -> dict:
+    """Global attributes that name every dataset of a combined store."""
+    titles = [p.ds.info.get("title", p.spec.dataset) for p in plans]
+    return {
+        "title": " + ".join(titles) + " - subset",
+        "source": " ".join(p.ds.url for p in plans),
+        "source_dataset": " ".join(p.spec.dataset for p in plans),
+        "source_datasets": [{"dataset": p.spec.dataset, "url": p.ds.url, "title": t,
+                             "updated": p.ds.info.get("updated", ""),
+                             "variables": [n for vp in p.vars for n in vp.out_names]}
+                            for p, t in zip(plans, titles)],
+        "edh_job": spec.to_dict(),
+        "edh_plan": {"parts": [{k: v for k, v in p.summary().items() if k != "eta_s"} for p in plans]},
+    }
+
+
 def root_attrs(plan: Plan, job_id: str, status: str = "incomplete", extra: dict | None = None) -> dict:
     spec, ds = plan.spec, plan.ds
     a = {
@@ -89,20 +175,21 @@ def _time_encoding(plan: Plan, base_units: str | None = None):
     units = base_units or plan.ds.time_units
     _, _, origin = units.partition(" since ")
     origin = pd.Timestamp(origin)
-    hours = (plan.labels - origin) / pd.Timedelta(hours=1)
+    labels = getattr(plan, "out_labels", plan.labels)
+    hours = (labels - origin) / pd.Timedelta(hours=1)
     if "minutes" in units:
-        minutes = (plan.labels - origin) / pd.Timedelta(minutes=1)
+        minutes = (labels - origin) / pd.Timedelta(minutes=1)
         return np.round(minutes).astype("i8"), f"minutes since {origin:%Y-%m-%d %H:%M:%S}"
     if np.allclose(hours, np.round(hours)):
         return np.round(hours).astype("i8"), f"hours since {origin:%Y-%m-%d %H:%M:%S}"
-    minutes = (plan.labels - origin) / pd.Timedelta(minutes=1)
+    minutes = (labels - origin) / pd.Timedelta(minutes=1)
     return np.round(minutes).astype("i8"), f"minutes since {origin:%Y-%m-%d %H:%M:%S}"
 
 
 def _write_layout(g: zarr.Group, plan: Plan) -> None:
     spec = plan.spec
     t = spec.time
-    if plan.n_periods:
+    if getattr(plan, "out_periods", plan.n_periods):
         vals, units = _time_encoding(plan)
         attrs = {"units": units, "calendar": "proleptic_gregorian", "standard_name": "time",
                  "axis": "T"}
@@ -115,14 +202,7 @@ def _write_layout(g: zarr.Group, plan: Plan) -> None:
                            dimension_names=["valid_time"], attributes=attrs, fill_value=0)
         a[:] = vals
     if plan.has_levels:
-        lv = np.asarray(plan.level_values)
-        name = plan.ds.meta.level_dim
-        level_attrs = getattr(plan, "level_attrs", None) or (
-            {"units": "hPa", "long_name": "pressure level", "positive": "down"} if name == "isobaricInhPa"
-            else {"long_name": name})
-        a = g.create_array(name, shape=lv.shape, dtype=lv.dtype, chunks=lv.shape, dimension_names=[name],
-                           attributes=level_attrs, fill_value=0)
-        a[:] = lv
+        _write_level_coord(g, plan)
     lat_attrs = {"units": "degrees_north", "standard_name": "latitude", "long_name": "latitude"}
     lon_attrs = {"units": "degrees_east", "standard_name": "longitude", "long_name": "longitude"}
     if plan.points is not None:
@@ -140,7 +220,6 @@ def _write_layout(g: zarr.Group, plan: Plan) -> None:
                                attributes=dict(at, comment="nearest grid cell" if nm in ("latitude", "longitude") else "as requested"),
                                fill_value=np.nan)
             a[:] = np.asarray(vals, dtype="f8")
-        coords = "latitude longitude point_name requested_latitude requested_longitude"
     elif getattr(plan, "curvilinear", False):  # projected grid (CERRA, CARRA): 2-D coordinates over (y, x)
         ny, nx = plan.shape_space
         for nm, n in (("y", ny), ("x", nx)):
@@ -152,18 +231,43 @@ def _write_layout(g: zarr.Group, plan: Plan) -> None:
             a = g.create_array(nm, shape=vals.shape, dtype="f8", chunks=vals.shape, dimension_names=["y", "x"],
                                attributes=dict(at, **grid_attrs), fill_value=np.nan)
             a[:] = vals
-        coords = "latitude longitude"
     else:
         for nm, vals, at in (("latitude", plan.out_lat, lat_attrs), ("longitude", plan.out_lon, lon_attrs)):
             a = g.create_array(nm, shape=vals.shape, dtype="f8", chunks=vals.shape, dimension_names=[nm],
                                attributes=at, fill_value=np.nan)
             a[:] = vals
-        coords = None
+    _write_vars(g, plan)
+
+
+def _coords_attr(plan: Plan) -> str | None:
+    """The CF ``coordinates`` attribute of data variables (points and projected grids have 2-D or extra ones)."""
+    if plan.points is not None:
+        return "latitude longitude point_name requested_latitude requested_longitude"
+    if getattr(plan, "curvilinear", False):
+        return "latitude longitude"
+    return None
+
+
+def _write_level_coord(g: zarr.Group, plan: Plan) -> None:
+    lv = np.asarray(plan.level_values)
+    name = plan.ds.meta.level_dim
+    level_attrs = getattr(plan, "level_attrs", None) or (
+        {"units": "hPa", "long_name": "pressure level", "positive": "down"} if name == "isobaricInhPa"
+        else {"long_name": name})
+    a = g.create_array(name, shape=lv.shape, dtype=lv.dtype, chunks=lv.shape, dimension_names=[name],
+                       attributes=level_attrs, fill_value=0)
+    a[:] = lv
+
+
+def _write_vars(g: zarr.Group, plan: Plan) -> None:
+    spec = plan.spec
+    t = spec.time
+    coords = _coords_attr(plan)
     for vp in plan.vars:
         src = vp.var.attrs
         base = {k: src[k] for k in KEEP_ATTRS if k in src}
         for stat, name in zip(vp.stats, vp.out_names):
-            attrs = dict(base, source_variable=vp.var.name)
+            attrs = dict(base, source_variable=vp.var.name, source_dataset=spec.dataset)
             if stat not in ("none",):
                 interval = CELL[t.freq].format(h=t.hours)
                 method = "point" if stat == "first" else ("minimum" if stat == "min" else
@@ -195,13 +299,14 @@ def _block_shape(src_chunks, dst_unit, shape, budget_bytes, itemsize) -> list[in
     return blk
 
 
-def _rechunk_export(src_store, out: str, plan: Plan, memory_gb: float, progress=None) -> int:
+def _rechunk_export(src_store, out: str, plan: "Plan | list[Plan]", memory_gb: float, progress=None) -> int:
     import itertools
 
+    plans = plan if isinstance(plan, list) else [plan]
     src = zarr.open_group(src_store, mode="r")
     dst = zarr.open_group(out, mode="w", zarr_format=3, attributes=dict(src.attrs))
-    o = plan.spec.output
-    data_vars = {n: vp for vp in plan.vars for n in vp.out_names}
+    o = plans[0].spec.output
+    data_vars = {n: (p, vp) for p in plans for vp in p.vars for n in vp.out_names}
     # coordinates: small, copied whole
     for name, arr in src.arrays():
         if name in data_vars:
@@ -213,9 +318,9 @@ def _rechunk_export(src_store, out: str, plan: Plan, memory_gb: float, progress=
     budget = memory_gb * 1e9 / 3
     total = 0
     blocks_all = []
-    for name, vp in data_vars.items():
+    for name, (p, vp) in data_vars.items():
         arr = src[name]
-        chunks, shards = plan.export_chunks(vp), plan.export_shards(vp)
+        chunks, shards = p.export_chunks(vp), p.export_shards(vp)
         d = dst.create_array(name, shape=arr.shape, dtype=arr.dtype, chunks=chunks, shards=shards,
                              fill_value=arr.fill_value, compressors=compressors(o),
                              dimension_names=arr.metadata.dimension_names, attributes=dict(arr.attrs))
@@ -324,8 +429,15 @@ def inspect_icechunk_for_extend(target_path: Path | str) -> dict:
         return {"ok": False, "error": f"failed to read {ic_path}: {e}"}
 
 
-def check_extension(repo: ic.Repository, plan: Plan, direction: str) -> str | None:
-    """Why ``plan`` cannot be appended to ``repo`` (None when it can). Checked before anything is resized."""
+def check_extension(repo: ic.Repository, plan: "Plan | list[Plan]", direction: str) -> str | None:
+    """Why ``plan`` cannot be appended to ``repo`` (None when it can). Checked before anything is resized.
+    A combined job passes the plans of all its parts: each must fit."""
+    if isinstance(plan, list):
+        for p in plan:
+            why = check_extension(repo, p, direction)
+            if why:
+                return f"{p.spec.dataset}: {why}" if len(plan) > 1 else why
+        return None
     g = zarr.open_group(repo.readonly_session("main").store, mode="r")
     if direction not in ("forward", "backward"):
         return f"unknown extension direction {direction!r}"
@@ -335,7 +447,7 @@ def check_extension(repo: ic.Repository, plan: Plan, direction: str) -> str | No
     if missing:
         return (f"the target store has no variable {', '.join(missing)}: extend with the variables it already "
                 f"holds")
-    if plan.n_periods == 0:
+    if plan.out_periods == 0:
         return "the new period is empty"
     if plan.points is not None:
         n = len(plan.points)
@@ -371,44 +483,49 @@ def extension_done(repo: ic.Repository, job_id: str) -> dict | None:
     return (g.attrs.get("edh_extensions") or {}).get(job_id)
 
 
-def extend_repo(repo: ic.Repository, plan: Plan, direction: str, job_id: str | None = None) -> dict:
+def extend_repo(repo: ic.Repository, plan: "Plan | list[Plan]", direction: str, job_id: str | None = None) -> dict:
+    """Make room for the new periods in every array of ``plan`` (all the parts' plans for a combined job), in
+    one commit."""
+    plans = plan if isinstance(plan, list) else [plan]
+    plan = plans[0]
     s = repo.writable_session("main")
     g = zarr.open_group(s.store, mode="r+")
     vt = g["valid_time"]
     old_len = vt.shape[0]
-    new_len = len(plan.labels)
+    new_len = plan.out_periods
     total_len = old_len + new_len
 
     vals, _ = _time_encoding(plan, base_units=vt.attrs.get("units"))
+    # only arrays along time grow: static fields (land-sea mask, orography) keep their shape
+    names = [n for p in plans for vp in p.vars for n in vp.out_names
+             if n in g and (g[n].metadata.dimension_names or ("",))[0] == "valid_time"]
 
     vt.resize((total_len,))
     if direction == "forward":
         vt[old_len:total_len] = vals
         offset = old_len
-        for vp in plan.vars:
-            for name in vp.out_names:
-                if name in g:
-                    arr = g[name]
-                    arr.resize((total_len, *arr.shape[1:]))
+        for name in names:
+            if name in g:
+                arr = g[name]
+                arr.resize((total_len, *arr.shape[1:]))
     elif direction == "backward":
         old_vals = vt[:old_len]
         vt[:new_len] = vals
         vt[new_len:total_len] = old_vals
         offset = 0
-        for vp in plan.vars:
-            for name in vp.out_names:
-                if name in g:
-                    arr = g[name]
-                    arr.resize((total_len, *arr.shape[1:]))
-                    ct = arr.chunks[0]
-                    if new_len % ct == 0:
-                        chunks_to_shift = new_len // ct
-                        shift = [chunks_to_shift] + [0] * (arr.ndim - 1)
-                        s.shift_array(f"/{name}", shift)
-                    else:
-                        for start in range(old_len, 0, -ct):
-                            s_idx = max(0, start - ct)
-                            arr[s_idx + new_len : start + new_len] = arr[s_idx : start]
+        for name in names:
+            if name in g:
+                arr = g[name]
+                arr.resize((total_len, *arr.shape[1:]))
+                ct = arr.chunks[0]
+                if new_len % ct == 0:
+                    chunks_to_shift = new_len // ct
+                    shift = [chunks_to_shift] + [0] * (arr.ndim - 1)
+                    s.shift_array(f"/{name}", shift)
+                else:
+                    for start in range(old_len, 0, -ct):
+                        s_idx = max(0, start - ct)
+                        arr[s_idx + new_len : start + new_len] = arr[s_idx : start]
     else:
         raise ValueError(f"unknown extension direction {direction!r}")
 
@@ -533,8 +650,8 @@ def verify_export(src_store, out: str, memory_gb: float = 16.0, progress=None) -
     return len(arrays)
 
 
-def export_zarr(repo: ic.Repository, out: Path, progress=None, consolidated: bool = True, plan: Plan | None = None,
-                memory_gb: float = 16.0, verify_progress=None) -> int:
+def export_zarr(repo: ic.Repository, out: Path, progress=None, consolidated: bool = True,
+                plan: "Plan | list[Plan] | None" = None, memory_gb: float = 16.0, verify_progress=None) -> int:
     """Write the committed state of ``main`` as a plain Zarr v3 directory.
 
     With the staging layout and no sharding, chunk bytes are copied as-is; otherwise the data variables are
@@ -549,7 +666,8 @@ def export_zarr(repo: ic.Repository, out: Path, progress=None, consolidated: boo
         shutil.rmtree(tmp)
     src = repo.readonly_session("main").store
     dst = zarr.storage.LocalStore(str(tmp))
-    if plan is not None and export_needs_rechunk(plan):
+    plans = plan if isinstance(plan, list) else [plan] if plan is not None else []
+    if any(export_needs_rechunk(p) for p in plans):
         n = _rechunk_export(src, str(tmp), plan, memory_gb, progress)
     else:
         n = asyncio.run(_copy_store(src, dst, progress=progress))

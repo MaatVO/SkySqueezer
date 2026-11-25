@@ -98,7 +98,11 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("CDSAPI_RC", str(tmp_path / "no-cdsapirc"))  # never the user's real CDS token
     monkeypatch.delenv("CDSAPI_URL", raising=False)
     monkeypatch.delenv("CDSAPI_KEY", raising=False)
-    from skysqueezer import keys
+    for v in ("SKS_DL_JOBS_DIR", "EDH_DL_JOBS_DIR"):  # never a real shared jobs folder
+        monkeypatch.delenv(v, raising=False)
+    from skysqueezer import keys, paths
+
+    monkeypatch.setattr(paths, "SYSTEM_CONFIG", tmp_path / "etc-sks-dl.json")
 
     keys.add_key("test", "test-key", quota=100_000)
     yield tmp_path

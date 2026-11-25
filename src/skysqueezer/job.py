@@ -115,6 +115,48 @@ class CdsSpec:
 
 
 @dataclass
+class PartSpec:
+    """One dataset of a combined job: what to take from it. Time, area and output are the job's own."""
+    dataset: str = ""
+    collection: str = "era5"
+    dataset_url: str | None = None
+    variables: list[str] = field(default_factory=list)
+    levels: list[float] | None = None
+    stats: dict[str, list[str]] = field(default_factory=dict)  # variable -> statistics (as ``TimeSpec.stats``)
+    rename: dict[str, str] = field(default_factory=dict)  # variable -> output base name (see ``resolve_names``)
+    # its own period inside the job's (None = the job's): steps of the store outside it stay empty
+    start: str | None = None
+    end: str | None = None
+    start_hour: int | None = None
+    end_hour: int | None = None
+
+
+def _suffix(dataset: str) -> str:
+    """A short, readable tag for a dataset id: ``era5-pressure-levels`` -> ``pressure_levels``."""
+    tag = dataset.removeprefix("reanalysis-").removeprefix("era5-") or dataset
+    return "".join(ch if ch.isalnum() else "_" for ch in tag).strip("_") or "part"
+
+
+def resolve_names(parts: list["PartSpec"]) -> list["PartSpec"]:
+    """Give every output variable a unique name: a variable already taken by an earlier part (``z`` is both the
+    surface geopotential and the geopotential on pressure levels) gets the dataset's tag, ``z_pressure_levels``.
+    Names the user set are kept; an impossible clash raises ``ValueError``."""
+    taken: dict[str, str] = {}
+    for p in parts:
+        for v in p.variables:
+            name = p.rename.get(v) or v
+            if name in taken:
+                if v in p.rename:
+                    raise ValueError(f"output name {name!r} is used twice ({taken[name]} and {p.dataset})")
+                base, name, n = f"{v}_{_suffix(p.dataset)}", f"{v}_{_suffix(p.dataset)}", 2
+                while name in taken:
+                    name, n = f"{base}{n}", n + 1
+                p.rename[v] = name
+            taken[name] = p.dataset
+    return parts
+
+
+@dataclass
 class JobSpec:
     source: str = "edh"  # data source id (see ``sources``); jobs written before sources existed are Earth Data Hub
     dataset: str = "era5-single-levels-atmosphere"
@@ -127,6 +169,10 @@ class JobSpec:
     output: OutputSpec = field(default_factory=OutputSpec)
     download: DownloadSpec = field(default_factory=DownloadSpec)
     cds: CdsSpec = field(default_factory=CdsSpec)
+    rename: dict[str, str] = field(default_factory=dict)  # variable -> output base name
+    # several datasets into one store: each part is downloaded in turn into the same repository (same time axis
+    # and grid), then exported once. Empty = the single dataset above. See ``part_spec``.
+    parts: list[PartSpec] = field(default_factory=list)
     version: int = 1
 
     def to_dict(self) -> dict:
@@ -140,8 +186,30 @@ class JobSpec:
         t = _make(TimeSpec, d.pop("time", None))
         a = dict(d.pop("area", None) or {})
         a["points"] = [_make(Point, p) for p in a.get("points") or []]
+        parts = [_make(PartSpec, p) for p in d.pop("parts", None) or [] if isinstance(p, dict)]
         return _make(cls, d, time=t, area=_make(AreaSpec, a), output=_make(OutputSpec, d.pop("output", None)),
-                     download=_make(DownloadSpec, d.pop("download", None)), cds=_make(CdsSpec, d.pop("cds", None)))
+                     download=_make(DownloadSpec, d.pop("download", None)), cds=_make(CdsSpec, d.pop("cds", None)),
+                     parts=parts)
+
+    @property
+    def combined(self) -> bool:
+        return bool(self.parts)
+
+    def part_spec(self, i: int) -> "JobSpec":
+        """The single-dataset job that part ``i`` is: the part's dataset and variables, the job's time, area,
+        output and download settings."""
+        import copy
+
+        p = self.parts[i]
+        s = copy.deepcopy(self)
+        s.parts = []
+        s.dataset, s.collection, s.dataset_url = p.dataset, p.collection, p.dataset_url
+        s.variables, s.levels, s.rename = list(p.variables), p.levels, dict(p.rename)
+        s.time.stats = dict(p.stats)
+        for k in ("start", "end", "start_hour", "end_hour"):
+            if getattr(p, k) is not None:
+                setattr(s.time, k, getattr(p, k))
+        return s
 
     @classmethod
     def load(cls, path: str | Path) -> "JobSpec":

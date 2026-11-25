@@ -149,6 +149,31 @@ class Ledger:
         return out
 
 
+def dismiss_waiting(job_dir: Path) -> int:
+    """Remove from the CDS the requests a stopped job left waiting there (a cancel when no worker runs: a paused or
+    crashed job keeps its place in the queue, a cancelled one must not). Returns how many were dismissed."""
+    job_dir = Path(job_dir)
+    led = Ledger(job_dir / "requests.json")
+    waiting = [e for e in led.entries if e["state"] == "queued" and e.get("job_id")]
+    if not waiting:
+        return 0
+    st = read_json(job_dir / "state.json", {}, dict)
+    spec = JobSpec.from_dict(st.get("spec") or {})
+    key = keys.get_key(spec.download.key, CDS)
+
+    async def go():
+        async with CDSClient(key.secret, retries=2) as c:
+            for e in waiting:
+                try:
+                    await c.delete(e["job_id"])
+                except CDSError:
+                    pass  # already finished or gone: nothing left to remove
+                led.set(e, state="planned", job_id=None, status=None)
+
+    asyncio.run(go())
+    return len(waiting)
+
+
 class CdsEngine(Engine):
     """Same job folder, state, control, stop handling, export and finish as ``Engine``; another pipeline."""
 
@@ -180,6 +205,10 @@ class CdsEngine(Engine):
             if missing and tier == "grib":
                 raise missing
             self.ledger = Ledger(self.dir / "requests.json")
+            for e in self.ledger.entries:  # resumed after a failure: the user asked to try those requests again
+                if e["state"] == "failed":
+                    self.ledger.set(e, state="planned", job_id=None, status=None, attempts=0, error=None)
+                    self.log.info(f"request {e['index'] + 1}: failed in the last run, asking for it again")
             self.cds_plan = self._make_plan()
             # NetCDF: converted unless the selection cannot fit a store, or an earlier run found the files cannot
             self.nc = tier == "netcdf" and self.cds_plan.convert and not self.state.get("kept_files")
@@ -615,6 +644,13 @@ class CdsEngine(Engine):
                             break  # the processor ended (all committed, or an error)
                         changed = await poll(c)
                         changed |= await submit(c)
+                        needed = self._needed()
+                        if (any(e["state"] == "failed" for e in needed)
+                                and not any(e["state"] in ("planned", "submitting", "queued", "ready") for e in needed)
+                                and not q["downloading"]):
+                            # nothing left that could ever finish the job: stop instead of waiting forever
+                            fatal("a request this job needs has failed and nothing else is in progress")
+                            break
                         for e in self._needed():
                             if (e["state"] == "ready" and e["index"] not in q["downloading"]
                                     and len(q["downloading"]) < DOWNLOADS):
@@ -642,8 +678,12 @@ class CdsEngine(Engine):
                         stop_async.set()
 
         async def watch_stop():
+            n = 0
             while not self.stop_event.is_set() and not stop_async.is_set():
                 await asyncio.sleep(0.5)
+                n += 1
+                if n % 4 == 0:
+                    self.control_stop()
             wake.set()
 
         speeds: dict[int, dict] = {}  # per download: bytes and time at the last look, smoothed speed

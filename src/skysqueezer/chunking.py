@@ -29,7 +29,7 @@ def _clamp(v, lo, hi):
 
 def chunk_shape(plan, vp, layout: str, output) -> tuple:
     """Chunk shape for output variable ``vp`` (dims as ``plan.out_dims(vp)``)."""
-    n = max(1, plan.n_periods)
+    n = max(1, getattr(plan, "out_periods", plan.n_periods))
     per_unit = max((u.k1 - u.k0 for u in plan.units if not u.static), default=1)
     lay = layout if layout in LAYOUTS else "auto"
     base = "auto" if lay == "custom" else lay
@@ -201,7 +201,7 @@ def analyze(plan, vp=None) -> list[dict]:
 
 def recommend(plan) -> tuple[str, str]:
     """(layout, short reason) for the current selection."""
-    n = plan.n_periods
+    n = getattr(plan, "out_periods", plan.n_periods)
     if plan.points is not None:
         return "timeseries", f"{plan.shape_space[0]} points × {n:,} steps: point data is read as time series."
     ny, nx = plan.shape_space

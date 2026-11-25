@@ -45,7 +45,69 @@ def cache_dir() -> Path:
     return _dir("CACHE_DIR", "XDG_CACHE_HOME", ".cache")
 
 
+SYSTEM_CONFIG = Path("/etc/sks-dl/config.json")  # set by the server's admin, read by every account
+
+
+_CONFIGS: dict[Path, tuple[float, dict]] = {}  # file -> (mtime, content): read again only when it changes
+
+
+def _config(f: Path) -> dict:
+    import json
+
+    try:
+        mt = f.stat().st_mtime
+    except OSError:
+        return {}
+    hit = _CONFIGS.get(f)
+    if hit and hit[0] == mt:
+        return hit[1]
+    try:
+        d = json.loads(f.read_text())
+    except (OSError, ValueError):
+        d = {}
+    d = d if isinstance(d, dict) else {}
+    _CONFIGS[f] = (mt, d)
+    return d
+
+
+def user_config() -> Path:
+    return config_dir() / "config.json"
+
+
+def _setting(name: str) -> str | None:
+    """A setting from ``SKS_DL_<NAME>``, else the user's ``config.json``, else the server-wide one."""
+    v = env(name.upper())
+    if v:
+        return v
+    for f in (user_config(), SYSTEM_CONFIG):
+        x = _config(f).get(name)
+        if isinstance(x, str) and x.strip():
+            return x.strip()
+    return None
+
+
+def shared_jobs_dir() -> Path | None:
+    """A jobs folder several accounts share (e.g. ``/srv/sks-dl/jobs``), or None for the private default."""
+    v = _setting("jobs_dir")
+    return Path(v).expanduser() if v else None
+
+
 def jobs_dir() -> Path:
-    p = data_dir() / "jobs"
+    shared = shared_jobs_dir()
+    p = shared or data_dir() / "jobs"
+    if shared and not p.exists():
+        p.mkdir(parents=True, exist_ok=True)
+        try:  # group-writable, and new folders inherit the group (setgid)
+            p.chmod(0o2775)
+        except OSError:
+            pass
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def share_files() -> None:
+    """With a shared jobs folder, files this process creates are group-writable (umask 002), so a colleague can
+    resume a job: its state, its temporary chunks and its Icechunk repository. Private files (API keys) set their
+    own mode."""
+    if shared_jobs_dir():
+        os.umask(0o002)

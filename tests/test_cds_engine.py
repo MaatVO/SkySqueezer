@@ -163,6 +163,56 @@ def test_queue_limit_as_failed_jobs(home, fast):
     assert "limits requests" in (job / "log.txt").read_text()
 
 
+def test_queue_limit_with_the_2026_wording(home, fast):
+    """The CDS now rejects the job with 'Maximum number queued requests ...': a queue limit, not a failure."""
+    fast.max_active, fast.throttle_mode, fast.queue_delay = 1, "job", 0.15
+    fast.throttle_text = ("Maximum number queued requests for this dataset has been reached. "
+                          "Please configure your scripts to request data sequentially")
+    s = spec(home, start="2020-01-30", end="2020-03-02", pack="month", max_inflight=3)
+    job = create_job(s)
+    assert run_foreground(job) == "completed"
+    log = (job / "log.txt").read_text()
+    assert "limits requests" in log and "failed 3 times" not in log
+
+
+def test_resume_after_a_failed_request_asks_for_it_again(home, fast):
+    from fake_cds import _canon
+
+    s = spec(home)
+    job = create_job(s)
+    canon = _canon(service.cds_plan(dict(s.to_dict()))["requests"][0]["inputs"])
+    fast.fail_requests.add(canon)
+    assert run_foreground(job) == "failed"
+    assert ledger(job)[0]["state"] == "failed"
+    fast.fail_requests.discard(canon)
+    assert run_foreground(job) == "completed"  # used to wait forever on the request marked failed
+    assert "asking for it again" in (job / "log.txt").read_text()
+
+
+def test_cancel_of_a_paused_job_dismisses_its_waiting_requests(home, fast, monkeypatch):
+    fast.queue_delay = 30  # never runs during the test
+    s = spec(home)
+    job = create_job(s)
+    orig = cds_engine.Ledger.set
+
+    def pause_once_queued(self, e, **kw):
+        orig(self, e, **kw)
+        if kw.get("state") == "queued":
+            runner.set_control(job, action="pause")
+            import os
+            import signal
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    monkeypatch.setattr(cds_engine.Ledger, "set", pause_once_queued)
+    assert run_foreground(job) == "paused"
+    monkeypatch.setattr(cds_engine.Ledger, "set", orig)
+    assert ledger(job)[0]["state"] == "queued"  # a pause keeps the place in the queue
+    runner.stop(job, "cancel")  # no worker runs now
+    assert runner.status(job)["status"] == "cancelled"
+    assert all(j["status"] == "dismissed" for j in fast.jobs.values())
+    assert ledger(job)[0]["state"] == "planned"
+
+
 def test_failing_request_stops_the_job(home, fast):
     from fake_cds import _canon
 

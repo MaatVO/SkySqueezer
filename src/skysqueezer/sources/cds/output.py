@@ -438,7 +438,8 @@ class CdsOutput:
             if self.cds.area is None:
                 p = _grid_path(self.cds.dataset, self.cds.grid)
                 p.parent.mkdir(parents=True, exist_ok=True)
-                np.savez(p, kind=self.grid.kind, lat=self.grid.lat, lon=self.grid.lon)
+                np.savez(p, kind=self.grid.kind, lat=self.grid.lat, lon=self.grid.lon,
+                         attrs=json.dumps(self.grid.attrs or {}, default=float))  # projection, for the map
         except Exception:  # noqa: BLE001  (a cache only)
             pass
 
@@ -480,9 +481,27 @@ def _cached_grid(dataset: str, grid: str | None) -> Grid | None:
         return None
     try:
         a = np.load(p)
-        return Grid(str(a["kind"]), a["lat"], a["lon"])
+        attrs = json.loads(str(a["attrs"])) if "attrs" in a.files else {}  # older caches have none
+        return Grid(str(a["kind"]), a["lat"], a["lon"], attrs)
     except Exception:  # noqa: BLE001
         return None
+
+
+def dataset_projection(dataset: str) -> dict:
+    """The map projection of a dataset's native grid (see projection.py): known from its id (CERRA), else
+    from the grid of an earlier job of it, else plate carrée over the globe."""
+    from ... import projection
+
+    p = projection.known(dataset)
+    if p is not None:
+        return p
+    g = _cached_grid(dataset, None)
+    if g is not None:
+        try:
+            return projection.from_grid(g.kind, g.lat, g.lon, g.attrs)
+        except Exception:  # noqa: BLE001  (a map only)
+            pass
+    return projection.latlon()
 
 
 def learned(dataset: str) -> dict:
